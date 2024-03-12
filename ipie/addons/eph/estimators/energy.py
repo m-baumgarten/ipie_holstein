@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 import plum
 
@@ -23,17 +22,18 @@ from ipie.addons.eph.estimators.local_energy_ssh import local_energy_ssh
 from ipie.addons.eph.hamiltonians.ssh import SSHModel
 
 from ipie.systems.generic import Generic
-from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase 
+from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
 from ipie.utils.backend import arraylib as xp
-from ipie.addons.eph.walkers.eph_walkers import EPhWalkers 
+from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+
 
 @plum.dispatch
 def local_energy(
-        system: Generic, 
-        hamiltonian: HolsteinModel, 
-        walkers: EPhWalkers, 
-        trial: EPhTrialWavefunctionBase
-):
+    system: Generic,
+    hamiltonian: HolsteinModel,
+    walkers: EPhWalkers,
+    trial: EPhTrialWavefunctionBase,
+) -> np.ndarray:
     return local_energy_holstein(system, hamiltonian, walkers, trial)
 
 @plum.dispatch
@@ -73,7 +73,6 @@ class EnergyEstimator(EstimatorBase):
         self.ascii_filename = filename
 
     def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
-        trial.calc_greens_function(walkers)
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
         self._data["ENumer"] = xp.sum(walkers.weight * energy[:, 0].real)
