@@ -3,7 +3,7 @@ from scipy.optimize import basinhopping
 
 from ipie.legacy.trial_wavefunction.harmonic_oscillator import HarmonicOscillator
 from ipie.systems.generic import Generic
-from ipie.addons.eph.hamiltonians.ssh import SSHModel
+from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
 
 import jax
 from jax.config import config
@@ -29,23 +29,23 @@ def local_energy(X: np.ndarray, G: np.ndarray, Lap: np.ndarray,
     m = hamiltonian.m
     nsites = hamiltonian.nsites
 
-    kinetic_contrib = jax.numpy.einsum('ij->', hamiltonian.T[0] * G[0])
-    if system.ndown > 0:
-        kinetic_contrib += jax.numpy.einsum('ij->', hamiltonian.T[1] * G[1])
+    kinetic = np.sum(hamiltonian.T[0] * G[0] + hamiltonian.T[1] * G[1])
 
-    tmp0 = hamiltonian.hop[0] * G[0] 
-    tmp0 = jax.numpy.dot(tmp0, X)
+    # Make displacement matrix
+    displ = hamiltonian.X_connectivity.dot(X)
+    displ_mat = np.diagonal(displ[:-1], 1) + np.diagonal(displ[:-1], -1)
+    if hamiltonian.pbc:
+        displ_mat[0,-1] = displ_mat[-1,0] = displ[-1]
+
+    # Merge Hilbert spaces
+    tmp0 = hamiltonian.g_tensor * G[0] * displ_mat
     if system.ndown > 0:
-        tmp1 = hamiltonian.hop[1] * G[1]
-        tmp1 = jax.numpy.dot(tmp1, X)
+        tmp1 = hamiltonian.g_tensor * G[1] * displ_mat 
         tmp0 += tmp1
-# TODO Fix this! 
-# NOTE Potentially fixed?
-#    rho = G[0].diagonal() + G[1].diagonal()
-    el_ph_contrib = -g * jax.numpy.sqrt(2 * m * w) * jax.numpy.sum(tmp0)
+    el_ph_contrib = jax.numpy.sqrt(2 * m * w) * jax.numpy.sum(tmp0)
 
-    phonon_contrib = m * w**2 * jax.numpy.sum(X * X) / 2
-    phonon_contrib += -0.5 * jax.numpy.sum(Lap) / m - 0.5 * w * nsites
+    phonon_contrib = m * w**2 * jax.numpy.sum(displ * displ) / 2
+    phonon_contrib -= 0.5 * w * nsites #Laplacian = 0 for real beta
 
     local_energy = kinetic_contrib + el_ph_contrib + phonon_contrib
     return local_energy

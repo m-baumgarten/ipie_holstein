@@ -63,7 +63,7 @@ def local_energy_holstein(
     energy[:, 2] = np.sum(np.diagonal(gf[0], axis1=1, axis2=2) * walkers.phonon_disp, axis=1)
     if system.ndown > 0:
         energy[:, 2] += np.sum(np.diagonal(gf[1], axis1=1, axis2=2) * walkers.phonon_disp, axis=1)
-    energy[:, 2] *= hamiltonian.const
+    energy[:, 2] *= -hamiltonian.g * hamiltonian.const
 
     energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0**2 * np.sum(walkers.phonon_disp**2, axis=1)
     energy[:, 3] -= 0.5 * hamiltonian.nsites * hamiltonian.w0

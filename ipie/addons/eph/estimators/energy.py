@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import plum
+import numpy
 
 from ipie.estimators.estimator_base import EstimatorBase
 
 from ipie.addons.eph.estimators.local_energy_holstein import local_energy_holstein
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.estimators.local_energy_ssh import local_energy_ssh
-from ipie.addons.eph.hamiltonians.ssh import SSHModel
+from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
 
 from ipie.systems.generic import Generic
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
@@ -33,13 +34,13 @@ def local_energy(
     hamiltonian: HolsteinModel,
     walkers: EPhWalkers,
     trial: EPhTrialWavefunctionBase,
-) -> np.ndarray:
+) -> numpy.ndarray:
     return local_energy_holstein(system, hamiltonian, walkers, trial)
 
 @plum.dispatch
 def local_energy(
         system: Generic,
-        hamiltonian: SSHModel,
+        hamiltonian: BondSSHModel,
         walkers: EPhWalkers,
         trial: EPhTrialWavefunctionBase
 ):

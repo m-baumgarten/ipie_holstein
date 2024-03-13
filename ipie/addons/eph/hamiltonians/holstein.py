@@ -13,9 +13,10 @@
 # limitations under the License.
 
 import numpy
+from typing import Sequence
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 
-
-class HolsteinModel:
+class HolsteinModel(GenericEPhModel):
     r"""Class carrying parameters specifying a 1D Holstein chain.
 
     The Holstein model is described by the Hamiltonian
@@ -46,25 +47,34 @@ class HolsteinModel:
     """
 
     def __init__(self, g: float, t: float, w0: float, nsites: int, pbc: bool):
+        super().__init__(nsites, pbc)
         self.g = g
         self.t = t
         self.w0 = w0
         self.m = 1 / self.w0
-        self.nsites = nsites
-        self.pbc = pbc
-        self.T = None
-        self.const = -self.g * numpy.sqrt(2.0 * self.m * self.w0)
+        self.const = numpy.sqrt(2.0 * self.m * self.w0)
 
     def build(self) -> None:
+        """Sets electronic hopping, electron-phonon couling tensor and defines
+        what lattice vibrations we are looking at."""
+        self.T = self.build_T()
+        self.g_tensor = self.build_g()
+
+    def build_T(self) -> Sequence[numpy.ndarray]:
         """Constructs electronic hopping matrix."""
-        self.T = numpy.diag(numpy.ones(self.nsites - 1), 1)
-        self.T += numpy.diag(numpy.ones(self.nsites - 1), -1)
+        T = numpy.diag(numpy.ones(self.nsites - 1), 1)
+        T += numpy.diag(numpy.ones(self.nsites - 1), -1)
 
         if self.pbc:
-            self.T[0, -1] = self.T[-1, 0] = 1.0
+            T[0, -1] = T[-1, 0] = 1.0
 
-        self.T *= -self.t
+        T *= -self.t
 
-        self.T = [self.T.copy(), self.T.copy()]
+        T = [T.copy(), T.copy()]
+        return T
 
-        self.g_tensor = -self.g * numpy.eye(self.nsites)
+    def build_g(self) -> numpy.ndarray:
+        """Constructs the electron-phonon tensor. For the Holstein model"""
+        g_tensor = -self.g * numpy.eye(self.nsites)
+        return g_tensor
+
