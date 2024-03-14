@@ -52,7 +52,8 @@ def objective_function_toyozawa_mo(
     num_energy = 0.0
     denom = 0.0
 
-    beta0 = shift0 * npj.sqrt(m * w0 / 2.0)
+    #beta0 = shift0 * npj.sqrt(m * w0 / 2.0)
+    beta0 = shift0
 
     for perm in perms:
         psia_j = psi0a[perm, :]

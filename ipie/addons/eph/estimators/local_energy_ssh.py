@@ -1,6 +1,7 @@
 import numpy as np
+import plum
 
-from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
+from ipie.addons.eph.hamiltonians.ssh import BondSSHModel, AcousticSSHModel
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 
@@ -30,31 +31,52 @@ def local_energy_ssh(
 
     energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
 
-    gf = trial.calc_greens_function(walkers)
-    walkers.Ga, walkers.Gb = gf[0], gf[1]
+    G = trial.calc_greens_function(walkers)
+    walkers.Ga, walkers.Gb = G[0], G[1]
 
     # Hopping Contribution
-    energy[:, 1] = np.sum(hamiltonian.T[0] * gf[0], axis=(1, 2))
+    energy[:, 1] = np.sum(hamiltonian.T[0] * G[0], axis=(1, 2))
     if system.ndown > 0:
-        energy[:, 1] += np.sum(hamiltonian.T[1] * gf[1], axis=(1, 2))
+        energy[:, 1] += np.sum(hamiltonian.T[1] * G[1], axis=(1, 2))
 
     # Electron-Phonon Contribution
-    displ = np.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
-    arg = np.einsum('nij,nj->ni', hamiltonian.g_tensor * gf[0], displ)
-    energy[:, 2] = np.sum(arg, axis=1)
+    offdiags = construct_position(walkers, hamiltonian) 
+    eph = hamiltonian.g_tensor * G[0] * offdiags
     if system.ndown > 0:
-        arg = np.einsum('nij,nj->ni', hamiltonian.g_tensor * gf[1], displ)
-        energy[:, 2] += np.sum(arg, axis=1)  
+        eph += hamiltonian.g_tensor * G[1] * offdiags
+    energy[:, 2] = np.sum(eph, axis=(1,2))
     energy[:, 2] *= hamiltonian.const
 
     # Phonon Contribution
-    energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0 ** 2 * np.sum(displ ** 2, axis=1)
+    energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0 ** 2 * np.sum(walkers.phonon_disp ** 2, axis=1)
     energy[:, 3] -= 0.5 * hamiltonian.nsites * hamiltonian.w0
     energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian_locenergy(walkers) / hamiltonian.m
     
     energy[:, 0] = np.sum(energy[:,1:], axis=1)
 
+#    print(energy)
+#    print(walkers.phonon_disp)
+#    print('offdiags:    ', offdiags)
+#    exit()
     return energy
 
+@plum.dispatch
+def construct_position(walkers: EPhWalkers, hamiltonian: BondSSHModel) -> np.ndarray: 
+    offdiags = np.zeros((walkers.nwalkers, hamiltonian.nsites, hamiltonian.nsites), dtype=np.complex128)
+    for w, disp in enumerate(walkers.phonon_disp):
+        offdiags[w,:,:] = np.diag(disp[:-1], -1)
+        offdiags[w,:,:] += offdiags[w,:,:].T
+    if hamiltonian.pbc:
+        offdiags[:,-1,0] = offdiags[:,0,-1] = walkers.phonon_disp[:,-1]
+    return offdiags
 
-
+@plum.dispatch
+def construct_position(walkers: EPhWalkers, hamiltonian: AcousticSSHModel) -> np.ndarray:
+    displacement = np.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
+    offdiags = np.zeros((walkers.nwalkers, hamiltonian.nsites, hamiltonian.nsites), dtype=np.complex128)
+    for w, disp in enumerate(displacement):
+        offdiags[w,:,:] = np.diag(disp[:-1], -1)
+        offdiags[w,:,:] += offdiags[w,:,:].T
+    if hamiltonian.pbc:
+        offdiags[:,-1,0] = offdiags[:,0,-1] = displacement[:,-1]
+    return offdiags

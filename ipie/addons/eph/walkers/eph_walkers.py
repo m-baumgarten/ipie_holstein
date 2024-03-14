@@ -92,6 +92,7 @@ class EPhWalkers(BaseWalkers):
         trial :
             Trial wavefunction object.
         """
+        self.phonon_disp *= numpy.sqrt(2 / (trial.m * trial.w0)) # Makes this expected position instead of beta
 
         if hasattr(trial, "nperms"):
             shape = (self.nwalkers, trial.nperms)

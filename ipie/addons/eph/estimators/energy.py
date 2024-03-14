@@ -20,7 +20,7 @@ from ipie.estimators.estimator_base import EstimatorBase
 from ipie.addons.eph.estimators.local_energy_holstein import local_energy_holstein
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.estimators.local_energy_ssh import local_energy_ssh
-from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
+from ipie.addons.eph.hamiltonians.ssh import BondSSHModel, AcousticSSHModel
 
 from ipie.systems.generic import Generic
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
@@ -43,6 +43,15 @@ def local_energy(
         hamiltonian: BondSSHModel,
         walkers: EPhWalkers,
         trial: EPhTrialWavefunctionBase
+):
+    return local_energy_ssh(system, hamiltonian, walkers, trial)
+
+@plum.dispatch
+def local_energy(
+    system: Generic,
+    hamiltonian: AcousticSSHModel,
+    walkers: EPhWalkers,
+    trial: EPhTrialWavefunctionBase
 ):
     return local_energy_ssh(system, hamiltonian, walkers, trial)
 

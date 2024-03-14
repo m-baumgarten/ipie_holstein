@@ -1,151 +1,90 @@
-import numpy 
+import numpy
 import time
 import scipy.linalg
+import plum
 
-from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
-from ipie.addons.eph.propagation.holstein import (
-        HolsteinPropagatorFree,
-        construct_one_body_propagator,
-)
+from ipie.addons.eph.hamiltonians.ssh import BondSSHModel, AcousticSSHModel
+from ipie.addons.eph.propagation.holstein import HolsteinPropagator
+from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
+from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 from ipie.propagation.operations import propagate_one_body
-from ipie.utils.backend import synchronize, cast_to_device
-from ipie.propagation.continuous_base import PropagatorTimer
+from ipie.utils.backend import synchronize
 
-# TODO change propaagte_walkers such that propagate_phonons and electrons
+# TODO change propagte_walkers such that propagate_phonons and electrons
 # takes walkers, trial, hamiltonian to just use HolsteinPropagatorFree / other
-# Base class 
+# Base class
 
-class SSHPropagatorFree(HolsteinPropagatorFree):
+class SSHPropagator(HolsteinPropagator):
     """"""
-    def __init__(self, time_step: float, verbose: bool = False):
-        super().__init__(time_step)
 
-    def build(self, hamiltonian: BondSSHModel, trial=None, walkers=None, mpi_handler=None):   
-        self.expH1 = construct_one_body_propagator(hamiltonian, self.dt)
-        self.const = hamiltonian.g * numpy.sqrt(2. * hamiltonian.m * hamiltonian.w0) * self.dt
-        self.w0 = hamiltonian.w0
-        self.m = hamiltonian.m
-        self.scale = numpy.sqrt(self.dt_ph / self.m)
-        self.nsites = hamiltonian.nsites
-
-    def propagate_phonons(self, walkers, hamiltonian, trial):
-        start_time = time.time()
-
-        #displ = numpy.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
-        displ = np.triu(np.subtract.outer(walkers.phonon_disp,walkers.phonon_disp))
-        displ += displ.T
-        displ *= walkers.X_connectivity
-        pot = 0.25 * self.m * self.w0**2 * numpy.sum(displ ** 2, axis=1)
-        pot = numpy.real(pot)
-        walkers.weight *= numpy.exp(-self.dt_ph * pot)
-
-        N = numpy.random.normal(loc=0.0, scale=self.scale, 
-                             size=(walkers.nwalkers, self.nsites))        
-        walkers.phonon_disp = walkers.phonon_disp + N 
-
-        displ = numpy.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
-        pot = 0.25 * self.m * self.w0**2 * numpy.sum(displ ** 2, axis=1)
-        pot = numpy.real(pot)
-        walkers.weight *= numpy.exp(-self.dt_ph * pot)
-            
-        walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2) #doesnt matter for estimators
-
-        synchronize()
-        self.timer.tgemm += time.time() - start_time
-
-    def propagate_electron(self, walkers, hamiltonian, trial):
-        start_time = time.time()
-        ovlp = trial.calc_greens_function(walkers) 
-        synchronize()
-        self.timer.tgf += time.time() - start_time
-
-        #displ = numpy.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
-        # TODO pretty sure to use * instead of einsum
-        #Eph = numpy.einsum('ij,ni->nij', hamiltonian.g_tensor, displ)
-        displ = np.triu(np.subtract.outer(walkers.phonon_disp,walkers.phonon_disp))
-        displ += displ.T
-        displ *= walkers.X_connectivity
-        EPh = hamiltonian.g_tensor * displ
-
-        expEph = scipy.linalg.expm(self.const * Eph)
-
-        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
-        walkers.phia = numpy.einsum('nij,nje->nie', expEph, walkers.phia)
-        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
-        
-        if walkers.ndown > 0:
-            Eph = numpy.einsum('ij,ni->nij', hamiltonian.hop[1], walkers.phonon_disp)
-            expEph = scipy.linalg.expm(self.const * Eph)
-
-            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
-            walkers.phib = numpy.einsum('nij,nje->nie', expEph, walkers.phib)
-            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
-
-    def propagate_walkers(self, walkers, hamiltonian, trial, eshift=None):
-        synchronize()
-        start_time = time.time()
-        ovlp = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp
-        synchronize()
-        self.timer.tgf += time.time() - start_time
-
-        # 2. Update Walkers
-        # 2.a DMC for phonon degrees of freedom
-        self.propagate_phonons(walkers, hamiltonian, trial)
-
-        # 2.b One-body propagation for electrons
-        self.propagate_electron(walkers, hamiltonian, trial)
-
-        # 2.c DMC for phonon degrees of freedom
-        self.propagate_phonons(walkers, hamiltonian, trial)
-
-        # Update weights (and later do phaseless for multi-electron)
-        start_time = time.time()
-        ovlp_new = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp_new
-        synchronize()
-        self.timer.tovlp += time.time() - start_time
-
-        start_time = time.time()
-        self.update_weight(walkers, ovlp, ovlp_new)
-        synchronize()
-        self.timer.tupdate += time.time() - start_time
-
-    
-    def update_weight(self, walkers, ovlp, ovlp_new):
-        walkers.weight *= ovlp_new / ovlp
-
-
-class SSHPropagator(SSHPropagatorFree):
-    """"""
     def __init__(self, time_step, verbose=False):
         super().__init__(time_step, verbose=verbose)
 
-    def propagate_phonons(self, walkers, hamiltonian, trial):
-        """Propagates phonons via Diffusion MC."""
+    def propagate_electron(
+        self, walkers: EPhWalkers, hamiltonian: BondSSHModel, trial: EPhTrialWavefunctionBase
+    ) -> None:
+        r"""Propagates electronic degrees of freedom via
+
+        .. math::
+            \mathrm{e}^{-\Delta \tau (\hat{H}_{\mathrm{el}} \otimes \hat{I}_{\mathrm{ph}} + \hat{H}_{\mathrm{el-ph}})}
+            \approx \mathrm{e}^{-\Delta \tau \hat{H}_{\mathrm{el}} / 2}
+            \mathrm{e}^{-\Delta \tau \hat{H}_{\mathrm{el-ph}}}
+            \mathrm{e}^{-\Delta \tau \hat{H}_{\mathrm{el}} / 2}.
+
+        This acts on walkers of the form :math:`|\phi(\tau)\rangle \otimes |X(\tau)\rangle`.
+
+
+        Parameters
+        ----------
+        walkers :
+            Walkers class
+        trial :
+            Trial class
+        """
         start_time = time.time()
-        
-        # No ZPE in pot -> cancels with ZPE of etrial, wouldn't affect estimators anyways
-        ph_ovlp_old = trial.calc_phonon_overlap(walkers)
-        
-        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
-        pot -= 0.5 * trial.calc_phonon_laplacian_importance(walkers) / hamiltonian.m
-        pot = numpy.real(pot)
-        walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
-
-        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))    
-        drift = trial.calc_phonon_gradient(walkers)
-        walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
-
-        ph_ovlp_new = trial.calc_phonon_overlap(walkers)        
-
-        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
-        pot -= 0.5 * trial.calc_phonon_laplacian_importance(walkers) / hamiltonian.m
-        pot = numpy.real(pot)
-        walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
-
-        walkers.weight *= ph_ovlp_old / ph_ovlp_new
-        walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
-
         synchronize()
-        self.timer.tgemm += time.time() - start_time
+        self.timer.tgf += time.time() - start_time
+
+        EPh = self.construct_EPh(walkers, hamiltonian)
+        expEph = scipy.linalg.expm(self.const * EPh)
+
+        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
+        walkers.phia = numpy.einsum("nij,nje->nie", expEph, walkers.phia)
+        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
+
+        if walkers.ndown > 0:
+            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
+            walkers.phib = numpy.einsum("nij,nje->nie", expEph, walkers.phib)
+            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
+
+
+    @plum.dispatch
+    def construct_EPh(self, walkers: EPhWalkers, hamiltonian: BondSSHModel) -> numpy.ndarray:
+       
+        offdiags = numpy.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=numpy.complex128)
+        for w,disp in enumerate(walkers.phonon_disp): 
+            offdiags[w,:,:] = numpy.diag(disp[:-1], -1)
+            offdiags[w,:,:] += offdiags[w,:,:].T
+        
+        if hamiltonian.pbc:
+            offdiags[:,-1,0] = offdiags[:,0,-1] = walkers.phonon_disp[:,-1]
+
+        EPh = hamiltonian.g_tensor * offdiags 
+        return EPh
+
+    @plum.dispatch
+    def construct_EPh(self, walkers: EPhWalkers, hamiltonian: AcousticSSHModel) -> numpy.ndarray:
+        
+        displacement = numpy.einsum('ij,nj->ni', hamiltonian.X_connectivity, walkers.phonon_disp)
+        offdiags = numpy.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=numpy.complex128)
+        for w,disp in enumerate(displacement):
+            offdiags[w,:,:] = numpy.diag(disp[:-1], -1)
+            offdiags[w,:,:] += offdiags[w,:,:].T
+
+        if hamiltonian.pbc:
+            offdiags[:,-1,0] = offdiags[:,0,-1] = displacement[:,-1]
+
+        # Shapes:   (nsites, nsites) * (nwalkers, nsites, nsites) -> (nwalkers, nsites, nsites)
+        EPh = hamiltonian.g_tensor * offdiags
+        return EPh
+

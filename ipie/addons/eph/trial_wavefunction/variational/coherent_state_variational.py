@@ -32,10 +32,13 @@ def local_energy(
     ndown: int,
 ) -> np.ndarray:
 
+    # X is the beta_shift here
+    # -> Initialize walkers not at beta_shift but 
+    # at expected position, i.e. sqrt(2/(mw)) * beta_shift
     kinetic = np.sum(T[0] * G[0] + T[1] * G[1])
     rho = G[0].diagonal() + G[1].diagonal()
     e_eph = -g * 2 * np.sum(rho * X) # had * np.sqrt(m * w)
-    e_ph = m * w**2 * np.sum(X * X)
+    e_ph = w * np.sum(X * X)
 
     local_energy = kinetic + e_eph + e_ph
     return local_energy

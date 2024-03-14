@@ -52,7 +52,8 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         self.m = 1 / w0
         self.nsites = self.nbasis
 
-        self.beta_shift = np.squeeze(wavefunction[:, 0])
+        # This beta_shift now corresponds to <X>, which is less tedious to work with
+        self.beta_shift = np.squeeze(wavefunction[:, 0]) * np.sqrt(2 / (self.m * self.w0))
         self.psia = wavefunction[:, 1 : self.nup + 1]
         self.psib = wavefunction[:, self.nup + 1 : self.nup + self.ndown + 1]
 
@@ -72,6 +73,9 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         etrial : :class:`float`
             Variational trial energy
         """
+        # Recover beta from <X>
+        beta0 = self.beta_shift * np.sqrt(0.5 * self.m * self.w0)
+        
         Ga, _, _ = gab_mod_ovlp(self.psia, self.psia)
         if self.ndown > 0:
             Gb, _, _ = gab_mod_ovlp(self.psib, self.psib)
@@ -81,9 +85,9 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
 
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
-        e_ph = ham.w0 * np.sum(self.beta_shift**2)
+        e_ph = ham.w0 * np.sum(beta0 ** 2)
         rho = ham.g_tensor * (G[0] + G[1])
-        e_eph = np.sum(np.dot(rho, 2 * self.beta_shift))
+        e_eph = np.sum(np.dot(rho, 2 * beta0))
 
         etrial = kinetic + e_ph + e_eph
         return etrial
@@ -229,5 +233,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
                 xp.einsum("ie,nif->nef", self.psib, walkers.phib.conj(), optimize=True)
             )
             Gb = xp.einsum("nie,nef,jf->nji", walkers.phib, inv_Ob, self.psib.conj(), optimize=True)
+        else:
+            Gb = xp.zeros_like(Ga)
 
         return [Ga, Gb]

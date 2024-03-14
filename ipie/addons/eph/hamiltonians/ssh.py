@@ -15,6 +15,7 @@
 import numpy
 from typing import Sequence
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.utils.backend import arraylib as xp
 
 
@@ -60,23 +61,26 @@ class BondSSHModel(GenericEPhModel):
         g_tensor = numpy.diag(numpy.ones(self.nsites-1), 1)
         g_tensor += numpy.diag(numpy.ones(self.nsites-1), -1)
         g_tensor *= -self.g
+        if self.pbc:
+            g_tensor[0,-1] = g_tensor[-1,0] = -self.g
+
         return g_tensor
 
-#    def build_X_connectivity(self) -> numpy.ndarray:
-#        """"""
-#        return numpy.eye(self.nsites)
+    def build_X_connectivity(self) -> numpy.ndarray:
+        """"""
+        return numpy.eye(self.nsites)
 
 class AcousticSSHModel(BondSSHModel):
     def __init__(self, g: float, v: float, w: float,
                  w0: float, ncell: int, pbc: bool):
         super().__init__(g, v, w, w0, ncell, pbc)
 
-#    def build_X_connectivity(self) -> numpy.ndarray:
+    def build_X_connectivity(self) -> numpy.ndarray:
         """"""
-#        X_connectivity = -numpy.ones(self.nsites)
-#        X_connectivity += numpy.diag(numpy.ones(self.nsites-1), 1)
-#        if self.pbc:
-#            X_connectivity[-1, 0] = 1.0
+        X_connectivity = numpy.diag(-numpy.ones(self.nsites))
+        X_connectivity += numpy.diag(numpy.ones(self.nsites-1), 1)
+        if self.pbc:
+            X_connectivity[-1, 0] = 1.0
 #        X_connectivity = numpy.diag(numpy.ones(self.nsites-1), 1)
 #        X_connectivity += numpy.diag(-numpy.ones(self.nsites-1), -1)
-#        return X_connectivity
+        return X_connectivity

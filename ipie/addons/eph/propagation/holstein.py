@@ -104,7 +104,7 @@ class HolsteinPropagatorFree:
             MPIHandler specifying rank and size
         """
         self.expH1 = construct_one_body_propagator(hamiltonian, self.dt)
-        self.const = hamiltonian.g * numpy.sqrt(2.0 * hamiltonian.m * hamiltonian.w0) * self.dt
+        self.const = -numpy.sqrt(2.0 * hamiltonian.m * hamiltonian.w0) * self.dt
         self.w0 = hamiltonian.w0
         self.m = hamiltonian.m
         self.scale = numpy.sqrt(self.dt_ph / self.m)
@@ -177,7 +177,8 @@ class HolsteinPropagatorFree:
         synchronize()
         self.timer.tgf += time.time() - start_time
 
-        expEph = numpy.exp(self.const * walkers.phonon_disp) # TODO here g_tensor
+        EPh = self.construct_EPh(walkers, hamiltonian)
+        expEph = numpy.exp(self.const * EPh)
 
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
         walkers.phia = numpy.einsum("ni,nie->nie", expEph, walkers.phia)
@@ -241,6 +242,8 @@ class HolsteinPropagatorFree:
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
         walkers.weight *= ovlp_new / ovlp
 
+    def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
+        return -hamiltonian.g * walkers.phonon_disp
 
 class HolsteinPropagator(HolsteinPropagatorFree):
     r"""Propagates walkers by trotterization, employing importance sampling for
