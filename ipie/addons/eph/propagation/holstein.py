@@ -240,7 +240,27 @@ class HolsteinPropagatorFree:
         self.timer.tupdate += time.time() - start_time
 
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
-        walkers.weight *= ovlp_new / ovlp
+        
+        ratio = ovlp_new / ovlp
+        phase = numpy.angle(ratio)
+    
+        for ip, p in enumerate(phase):
+            if numpy.abs(p) < 0.5 * numpy.pi:
+                magn = numpy.abs(ratio[ip])
+                cosine_fac = numpy.max([0., numpy.cos(p)])
+                walkers.weight[ip] *= magn * cosine_fac
+            else:
+                walkers.weight[ip] = 0.
+
+#        if abs(phase) < 0.5 * math.pi:
+#            (magn, phase) = cmath.polar(ratio)
+#            cosine_fac = max(0, math.cos(phase))
+#            walkers.weight *= magn * cosine_fac
+#        else:
+#            walker.ot = ot_new
+#            walker.weight = 0.0
+        
+#        walkers.weight *= ovlp_new / ovlp
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
