@@ -27,6 +27,3 @@ class GenericEPhModel(metaclass=ABCMeta):
 
     @abstractmethod
     def build_g(self): ...
-
-#    @abstractmethod
-#    def build_X_connectivity(self): ...

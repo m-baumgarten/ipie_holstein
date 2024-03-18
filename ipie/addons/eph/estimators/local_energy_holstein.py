@@ -69,6 +69,6 @@ def local_energy_holstein(
     energy[:, 3] -= 0.5 * hamiltonian.nsites * hamiltonian.w0
     energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian_locenergy(walkers) / hamiltonian.m
 
-    energy[:, 0] = np.sum(energy[:, 1:], axis=1)
+    energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
 
     return energy
