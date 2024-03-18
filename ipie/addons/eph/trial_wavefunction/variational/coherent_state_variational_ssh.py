@@ -136,7 +136,6 @@ def variational_trial(init_phonons: np.ndarray, init_electron: np.ndarray, hamil
     init_electron = init_electron.astype(np.float64).ravel()
 
     hamiltonian.X_connectivity = npj.array(hamiltonian.X_connectivity.astype(np.float64))
-    print('X conn:  ', hamiltonian.X_connectivity)
     x = np.hstack([init_phonons, init_electron])
 
     maxiter = 500

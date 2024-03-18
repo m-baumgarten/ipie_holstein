@@ -52,11 +52,15 @@ class ToyozawaTrial(CoherentStateTrial):
         w0: float,
         num_elec: Tuple[int, int],
         num_basis: int,
-        verbose=False,
+        K: float=0.,
+        verbose: bool=False
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, verbose=verbose)
+#        assert np.isclose(K * np.pi / self.nbasis - int(K * np.pi / self.nbasis), 0.)
         self.perms = circ_perm(np.arange(self.nbasis))
         self.nperms = self.perms.shape[0]
+        self.kcoeffs = np.exp(1j * K * np.arange(self.nbasis)) 
+        self.K = K
 
     def calc_energy(self, ham, zero_th=1e-12):
         r"""Computes the variational energy of the trial, i.e.
@@ -83,7 +87,7 @@ class ToyozawaTrial(CoherentStateTrial):
         denom = 0.0
         # Recover beta from expected position <X> we store as beta_shift
         beta0 = self.beta_shift * np.sqrt(0.5 * ham.m * ham.w0)
-        for perm in self.perms:
+        for ip, (coeff, perm) in enumerate(zip(self.kcoeffs, self.perms)):
             psia_i = self.psia[perm, :]
             beta_i = beta0[perm]
 
@@ -98,9 +102,15 @@ class ToyozawaTrial(CoherentStateTrial):
                 ov = np.linalg.det(self.psia.T.dot(psia_i)) * np.prod(
                     np.exp(-0.5 * (beta0**2 + beta_i**2) + beta0 * beta_i)
                 )
+            ov *= self.kcoeffs[0].conj() * coeff
 
-            if ov < zero_th:
+            if np.abs(ov) < zero_th:
                 continue
+
+            if ip != 0:
+                ov = ov.real * (self.nbasis-ip) * 2
+            else:
+                ov = ov.real * self.nbasis
 
             Ga_i, _, _ = gab_mod_ovlp(self.psia, psia_i)
             if self.ndown > 0:
@@ -139,7 +149,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         ph_ovlp_perm = self.calc_phonon_overlap_perms(walkers)
         el_ovlp_perm = self.calc_electronic_overlap_perms(walkers)
-        walkers.ovlp_perm = el_ovlp_perm * ph_ovlp_perm
+        walkers.ovlp_perm = ph_ovlp_perm * el_ovlp_perm #* self.kcoeffs
         return walkers.ovlp_perm
 
     def calc_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -324,7 +334,7 @@ class ToyozawaTrial(CoherentStateTrial):
         el_ovlp_perm : :class:`np.ndarray`
             Electronic overlap of each permuted Slater Determiant with walkers
         """
-        for ip, perm in enumerate(self.perms):
+        for ip, (coeff, perm) in enumerate(zip(self.kcoeffs, self.perms)):
             ovlp_a = xp.einsum(
                 "wmi,mj->wij", walkers.phia, self.psia[perm, :].conj(), optimize=True
             )
@@ -338,6 +348,8 @@ class ToyozawaTrial(CoherentStateTrial):
                 ot = sign_a * sign_b * xp.exp(log_ovlp_a + log_ovlp_b - walkers.log_shift)
             else:
                 ot = sign_a * xp.exp(log_ovlp_a - walkers.log_shift)
+
+            ot *= coeff.conj()
 
             walkers.el_ovlp[:, ip] = ot
         return walkers.el_ovlp
@@ -357,7 +369,7 @@ class ToyozawaTrial(CoherentStateTrial):
             Electronic overlap of trial with walkers
         """
         el_ovlp_perms = self.calc_electronic_overlap_perms(walkers)
-        el_ovlp = np.sum(el_ovlp_perms, axis=1)
+        el_ovlp = np.sum(el_ovlp_perms * self.kcoeffs, axis=1)
         return el_ovlp
 
     def calc_greens_function(self, walkers: EPhWalkers, build_full=True) -> np.ndarray:
