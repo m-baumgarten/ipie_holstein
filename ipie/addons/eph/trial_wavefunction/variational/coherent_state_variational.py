@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import numpy as np
-from scipy.optimize import basinhopping
+from scipy.optimize import basinhopping, minimize
 
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 
@@ -98,10 +98,10 @@ def variational_trial(init_phonons: np.ndarray, init_electron: np.ndarray, hamil
 
     x = np.hstack([init_phonons, init_electron])
 
-    maxiter = 500
-    minimizer_kwargs = {
-        "jac": True,
-        "args": (
+    res = minimize(
+        objective_function,
+        x,
+        args=(
             hamiltonian.nsites,
             hamiltonian.T,
             hamiltonian.g,
@@ -110,23 +110,20 @@ def variational_trial(init_phonons: np.ndarray, init_electron: np.ndarray, hamil
             system.nup,
             system.ndown,
         ),
-        "options": {
+        jac=gradient,
+        tol=1e-10,
+        method="L-BFGS-B",
+        options={
+            "maxls": 20,
             "gtol": 1e-10,
             "eps": 1e-10,
-            "maxiter": maxiter,
-            "disp": False,
+            "maxiter": 15000,
+            "ftol": 1.0e-10,
+            "maxcor": 1000,
+            "maxfun": 15000,
+            "disp": True,
         },
-    }
-
-    res = basinhopping(
-        func,
-        x,
-        minimizer_kwargs=minimizer_kwargs,
-        callback=print_fun,
-        niter=maxiter,
-        niter_success=3,
     )
-
     etrial = res.fun
 
     beta_shift = res.x[: hamiltonian.nsites]

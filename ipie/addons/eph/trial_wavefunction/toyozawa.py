@@ -56,7 +56,6 @@ class ToyozawaTrial(CoherentStateTrial):
         verbose: bool=False
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, verbose=verbose)
-#        assert np.isclose(K * np.pi / self.nbasis - int(K * np.pi / self.nbasis), 0.)
         self.perms = circ_perm(np.arange(self.nbasis))
         self.nperms = self.perms.shape[0]
         self.kcoeffs = np.exp(1j * K * np.arange(self.nbasis)) 
@@ -369,7 +368,8 @@ class ToyozawaTrial(CoherentStateTrial):
             Electronic overlap of trial with walkers
         """
         el_ovlp_perms = self.calc_electronic_overlap_perms(walkers)
-        el_ovlp = np.sum(el_ovlp_perms * self.kcoeffs, axis=1)
+#        el_ovlp = np.sum(el_ovlp_perms * self.kcoeffs, axis=1)
+        el_ovlp = np.sum(el_ovlp_perms, axis=1)
         return el_ovlp
 
     def calc_greens_function(self, walkers: EPhWalkers, build_full=True) -> np.ndarray:
