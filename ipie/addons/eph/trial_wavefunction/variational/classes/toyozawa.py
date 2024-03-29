@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import numpy as np
-from typing import List, Union
+from typing import List, Union, Tuple
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
@@ -23,6 +23,7 @@ import jax.numpy as npj
 import plum
 
 from ipie.addons.eph.trial_wavefunction.variational.classes.variational import Variational
+
 
 def circ_perm(lst: np.ndarray) -> np.ndarray:
     """Returns a matrix which rows consist of all possible
@@ -40,117 +41,113 @@ def circ_perm(lst: np.ndarray) -> np.ndarray:
     return circs
 
 
-class ToyozawaVariational(Variational):
-    def __init__(self, shift_init: np.ndarray, electron_init: np.ndarray,
-            hamiltonian, system, K = 0.):
-        super().__init__(shift_init, electron_init, hamiltonian, system)
+class ToyozawaVariational(VariationalComplex):
+    def __init__(
+        self,
+        shift_init: np.ndarray,
+        electron_init: np.ndarray,
+        hamiltonian,
+        system,
+        K: float = 0.0,
+        cplx: bool = True,
+    ):
+        super().__init__(shift_init, electron_init, hamiltonian, system, cplx)
         self.K = K
         self.perms = circ_perm(np.arange(hamiltonian.nsites))
         self.nperms = self.perms.shape[0]
-        self.Kcoeffs =  np.exp(1j * K * np.arange(hamiltonian.nsites))
+        self.Kcoeffs = np.exp(1j * K * np.arange(hamiltonian.nsites))
 
-    def objective_function(self, x, zero_th=1e-12) -> float:
+    def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
-        
+        shift_abs = npj.abs(shift)
+
         num_energy = 0.0
         denom = 0.0
-        
-        for ip, (perm, coeff) in enumerate(zip(self.perms, self.Kcoeffs)):
 
-            beta_j = shift[npj.array(perm)]
-            psia_j = c0a[perm, :]
+        for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
 
-            # Compute Overlap and determine whether this permutation contributes to E_var
-            overlap = npj.linalg.det(c0a.T.dot(psia_j)) * npj.prod(
-                npj.exp(-0.5 * (shift**2 + beta_j**2) + shift * beta_j)
+            beta_i = shift[npj.array(permi)]
+            beta_i_abs = npj.abs(beta_i)
+            psia_i = c0a[permi, :]
+
+            overlap = npj.linalg.det(c0a.conj().T.dot(psia_i)) * npj.prod(
+                npj.exp(-0.5 * (shift_abs**2 + beta_i_abs**2) + shift.conj() * beta_i)
             )
             if self.sys.ndown > 0:
-                psib_j = c0b[perm, :]
-                overlap *= npj.linalg.det(c0b.T.dot(psib_j))
-#                overlap = (
-#                    npj.linalg.det(c0a.T.dot(psia_j))
-#                    * npj.linalg.det(c0b.T.dot(psib_j))
-#                    * npj.prod(npj.exp(-0.5 * (shift**2 + beta_j**2) + shift * beta_j))
-#                    * npj.prod(npj.exp(-0.5 * (shift - beta_j)**2))
-#                )
-#            else:
-#                overlap = npj.linalg.det(c0a.T.dot(psia_j)) * npj.prod(
-#                    npj.exp(-0.5 * (shift**2 + beta_j**2) + shift * beta_j)
-                    #npj.exp(-0.5 * (shift - beta_j)**2)
-#                )
-            overlap *= self.Kcoeffs[0] * coeff.conj()
-            
+                psib_i = c0b[permi, :]
+                overlap *= npj.linalg.det(c0b.conj().T.dot(psib_i))
+            overlap *= self.Kcoeffs[0].conj() * coeffi
+
             if npj.abs(overlap) < zero_th:
                 continue
-            
+
             if ip != 0:
-                overlap = overlap.real * (self.ham.nsites-ip) * 2
+                overlap = overlap * (self.ham.nsites - ip) * 2
             else:
-                overlap = overlap.real * self.ham.nsites
+                overlap = overlap * self.ham.nsites
 
             # Evaluate Greens functions
-            Ga_j = gab(c0a, psia_j)
+            Ga_j = gab(c0a, psia_i)
             if self.sys.ndown > 0:
-                Gb_j = gab(c0b, psib_j)
+                Gb_j = gab(c0b, psib_i)
             else:
                 Gb_j = npj.zeros_like(Ga_j)
             G_j = [Ga_j, Gb_j]
 
             # Obtain projected energy of permuted soliton on original soliton
-            projected_energy = self.projected_energy(self.ham, G_j, shift, beta_j)
+            projected_energy = self.projected_energy(self.ham, G_j, shift, beta_i)
 
-            
-            num_energy += projected_energy * overlap
-            denom += overlap
+            num_energy += (projected_energy * overlap).real
+            denom += overlap.real
 
         energy = num_energy / denom
-        return energy
+        return energy.real
 
     def get_args(self):
         return ()
 
     @plum.dispatch
-    def projected_energy(self, ham: HolsteinModel, G: list, shift, beta_j):
+    def projected_energy(self, ham: HolsteinModel, G: list, shift, beta_i):
         rho = G[0].diagonal() + G[1].diagonal()
         kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-        phonon_contrib = ham.w0 * npj.sum(shift * beta_j)
-        el_ph_contrib = -ham.g * npj.dot(rho, shift + beta_j)
+        phonon_contrib = ham.w0 * npj.sum(shift.conj() * beta_i)
+        el_ph_contrib = -ham.g * npj.dot(rho, shift.conj() + beta_i)
         projected_energy = kinetic + el_ph_contrib + phonon_contrib
         return projected_energy
- 
 
+    ### not yet complexificated
     @plum.dispatch
-    def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_j):
+    def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-        
-        X = shift + beta_j
+
+        X = shift + beta_i
         displ = npj.array(ham.X_connectivity).dot(X)
         displ_mat = npj.diag(displ[:-1], 1)
         displ_mat += displ_mat.T
         if ham.pbc:
-            displ_mat = displ_mat.at[0,-1].set(displ[-1])
-            displ_mat = displ_mat.at[-1,0].set(displ[-1])
+            displ_mat = displ_mat.at[0, -1].set(displ[-1])
+            displ_mat = displ_mat.at[-1, 0].set(displ[-1])
 
         tmp0 = ham.g_tensor * G[0] * displ_mat
         if self.sys.ndown > 0:
             tmp0 += ham.g_tensor * G[1] * displ_mat
         el_ph_contrib = jax.numpy.sum(tmp0)
-        
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_j)
+
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
 
     @plum.dispatch
-    def variational_energy(self, ham: BondSSHModel, G: list, shift, beta_j):
+    def variational_energy(self, ham: BondSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-        
-        X = shift + beta_j
+
+        X = shift + beta_i
         tmp0 = ham.g_tensor * G[0] * X
         if self.sys.ndown > 0:
             tmp0 += ham.g_tensor * G[1] * X
         el_ph_contrib = 2 * jax.numpy.sum(tmp0)
-        
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_j)
+
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
