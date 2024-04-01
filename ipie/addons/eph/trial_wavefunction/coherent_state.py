@@ -56,6 +56,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         self.beta_shift = np.squeeze(wavefunction[:, 0]) * np.sqrt(2 / (self.m * self.w0))
         self.psia = wavefunction[:, 1 : self.nup + 1]
         self.psib = wavefunction[:, self.nup + 1 : self.nup + self.ndown + 1]
+        # NOTE these may generally be complex arrays
 
     def calc_energy(self, ham) -> float:
         r"""Computes the variational energy of the trial,
@@ -85,10 +86,9 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
 
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
-        e_ph = ham.w0 * np.sum(beta0 ** 2)
+        e_ph = ham.w0 * np.sum(beta0.conj() * beta0)
         rho = ham.g_tensor * (G[0] + G[1])
-        e_eph = np.sum(np.dot(rho, 2 *  beta0))
-#        e_eph = np.sum(np.dot(rho, beta0.conj() + beta0))
+        e_eph = np.sum(np.dot(rho, beta0.conj() + beta0))
 
         etrial = kinetic + e_ph + e_eph
         return etrial
@@ -127,7 +127,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         ph_ovlp : :class:`np.ndarray`
             Overlap of walekr position states with coherent trial state.
         """
-        ph_ovlp = np.exp(-(self.m * self.w0 / 2) * (walkers.phonon_disp - self.beta_shift) ** 2)
+        ph_ovlp = np.exp(-(self.m * self.w0 / 2) * (walkers.phonon_disp - self.beta_shift.real) ** 2 - 1j * self.m * self.w0 * walkers.phonon_disp * self.beta_shift.imag)
         walkers.ph_ovlp = np.prod(ph_ovlp, axis=1)
         return walkers.ph_ovlp
 
@@ -148,7 +148,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         grad : :class:`np.ndarray`
             Gradient of phonon overlap
         """
-        grad = walkers.phonon_disp - self.beta_shift
+        grad = walkers.phonon_disp - self.beta_shift.conj()
         grad *= -self.m * self.w0
         return grad
 
@@ -170,7 +170,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         laplacian: :class:`np.ndarray`
             Laplacian of phonon overlap
         """
-        arg = (walkers.phonon_disp - self.beta_shift) * self.m * self.w0
+        arg = (walkers.phonon_disp - self.beta_shift.conj()) * self.m * self.w0
         arg2 = arg**2
         laplacian = np.sum(arg2, axis=1) - self.nsites * self.m * self.w0
         return laplacian

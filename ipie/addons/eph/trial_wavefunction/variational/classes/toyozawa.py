@@ -41,7 +41,7 @@ def circ_perm(lst: np.ndarray) -> np.ndarray:
     return circs
 
 
-class ToyozawaVariational(VariationalComplex):
+class ToyozawaVariational(Variational):
     def __init__(
         self,
         shift_init: np.ndarray,

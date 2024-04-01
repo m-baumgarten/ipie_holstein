@@ -25,7 +25,7 @@ import plum
 from ipie.addons.eph.trial_wavefunction.variational.classes.variational import Variational
 
 
-class CoherentStateVariational(VariationalComplex):
+class CoherentStateVariational(Variational):
     def __init__(
         self,
         shift_init: np.ndarray,
