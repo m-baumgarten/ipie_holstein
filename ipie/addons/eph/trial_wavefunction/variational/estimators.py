@@ -20,5 +20,5 @@ config.update("jax_enable_x64", True)
 
 def gab(A: npj.ndarray, B: npj.ndarray) -> npj.ndarray:
     inv_O = npj.linalg.inv((A.conj().T).dot(B))
-    GAB = B.dot(inv_O.dot(A.conj().T)) #.T
+    GAB = B.dot(inv_O.dot(A.conj().T))
     return GAB

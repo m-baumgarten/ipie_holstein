@@ -17,7 +17,7 @@ from typing import Tuple
 
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
-from ipie.addons.eph.trial_wavefunction.variational.toyozawa_variational import circ_perm
+from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm
 from ipie.utils.backend import arraylib as xp
 from ipie.estimators.greens_function_single_det import gab_mod_ovlp
 
@@ -52,13 +52,13 @@ class ToyozawaTrial(CoherentStateTrial):
         w0: float,
         num_elec: Tuple[int, int],
         num_basis: int,
-        K: float=0.,
-        verbose: bool=False
+        K: float = 0.0,
+        verbose: bool = False,
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, verbose=verbose)
         self.perms = circ_perm(np.arange(self.nbasis))
         self.nperms = self.perms.shape[0]
-        self.kcoeffs = np.exp(1j * K * np.arange(self.nbasis)) 
+        self.kcoeffs = np.exp(1j * K * np.arange(self.nbasis))
         self.K = K
 
     def calc_energy(self, ham, zero_th=1e-12):
@@ -93,13 +93,13 @@ class ToyozawaTrial(CoherentStateTrial):
             if self.ndown > 0:
                 psib_i = self.psib[perm, :]
                 ov = (
-                    np.linalg.det(self.psia.T.dot(psia_i))
-                    * np.linalg.det(self.psib.T.dot(psib_i))
-                    * np.prod(np.exp(-0.5 * (beta0**2 + beta_i**2) + beta0 * beta_i))
+                    np.linalg.det(self.psia.conj().T.dot(psia_i))
+                    * np.linalg.det(self.psib.conj().T.dot(psib_i))
+                    * np.prod(np.exp(-0.5 * (np.abs(beta0)**2 + np.abs(beta_i)**2) + beta0.conj() * beta_i))
                 )
             else:
-                ov = np.linalg.det(self.psia.T.dot(psia_i)) * np.prod(
-                    np.exp(-0.5 * (beta0**2 + beta_i**2) + beta0 * beta_i)
+                ov = np.linalg.det(self.psia.conj().T.dot(psia_i)) * np.prod(
+                    np.exp(-0.5 * (np.abs(beta0)**2 + np.abs(beta_i)**2) + beta0.conj() * beta_i)
                 )
             ov *= self.kcoeffs[0].conj() * coeff
 
@@ -107,9 +107,9 @@ class ToyozawaTrial(CoherentStateTrial):
                 continue
 
             if ip != 0:
-                ov = ov.real * (self.nbasis-ip) * 2
+                ov = ov * (self.nbasis - ip) * 2
             else:
-                ov = ov.real * self.nbasis
+                ov = ov * self.nbasis
 
             Ga_i, _, _ = gab_mod_ovlp(self.psia, psia_i)
             if self.ndown > 0:
@@ -122,8 +122,8 @@ class ToyozawaTrial(CoherentStateTrial):
             e_ph = ham.w0 * np.sum(beta0 * beta_i)
             rho = ham.g_tensor * (G_i[0] + G_i[1])
             e_eph = np.sum(np.dot(rho, beta0 + beta_i))
-            num_energy += (kinetic + e_ph + e_eph) * ov
-            denom += ov
+            num_energy += np.real((kinetic + e_ph + e_eph) * ov)
+            denom += np.real(ov)
 
         etrial = num_energy / denom
         return etrial
@@ -148,7 +148,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         ph_ovlp_perm = self.calc_phonon_overlap_perms(walkers)
         el_ovlp_perm = self.calc_electronic_overlap_perms(walkers)
-        walkers.ovlp_perm = ph_ovlp_perm * el_ovlp_perm #* self.kcoeffs
+        walkers.ovlp_perm = ph_ovlp_perm * el_ovlp_perm
         return walkers.ovlp_perm
 
     def calc_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -193,7 +193,9 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         for ip, perm in enumerate(self.perms):
             ph_ov = np.exp(
-                -(0.5 * self.m * self.w0) * (walkers.phonon_disp - self.beta_shift[perm]) ** 2
+                -(0.5 * self.m * self.w0) * (walkers.phonon_disp - self.beta_shift[perm].real) ** 2
+                - 1j * self.m * self.w0 * walkers.phonon_disp * self.beta_shift[perm].imag
+                + 1j * self.beta_shift[perm].real * self.beta_shift[perm].imag
             )
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
         return walkers.ph_ovlp
@@ -246,7 +248,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
         for ovlp, perm in zip(walkers.ph_ovlp.T, self.perms):
-            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm]), ovlp)
+            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm]), ovlp) # NOTE this is not yet updated in coherent_state, beta shift should only take real part. 
         grad *= -self.m * self.w0
         grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ph_ovlp, axis=1))
         return grad
@@ -335,13 +337,13 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         for ip, (coeff, perm) in enumerate(zip(self.kcoeffs, self.perms)):
             ovlp_a = xp.einsum(
-                "wmi,mj->wij", walkers.phia, self.psia[perm, :].conj(), optimize=True
+                "mi,wmj->wij", self.psia[perm, :].conj(), walkers.phia, optimize=True
             )
             sign_a, log_ovlp_a = xp.linalg.slogdet(ovlp_a)
 
             if self.ndown > 0:
                 ovlp_b = xp.einsum(
-                    "wmi,mj->wij", walkers.phib, self.psib[perm, :].conj(), optimize=True
+                    "mi,wmj->wij", self.psib[perm, :].conj(), walkers.phib, optimize=True
                 )
                 sign_b, log_ovlp_b = xp.linalg.slogdet(ovlp_b)
                 ot = sign_a * sign_b * xp.exp(log_ovlp_a + log_ovlp_b - walkers.log_shift)
@@ -368,7 +370,6 @@ class ToyozawaTrial(CoherentStateTrial):
             Electronic overlap of trial with walkers
         """
         el_ovlp_perms = self.calc_electronic_overlap_perms(walkers)
-#        el_ovlp = np.sum(el_ovlp_perms * self.kcoeffs, axis=1)
         el_ovlp = np.sum(el_ovlp_perms, axis=1)
         return el_ovlp
 
@@ -395,13 +396,13 @@ class ToyozawaTrial(CoherentStateTrial):
 
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
             inv_Oa = xp.linalg.inv(
-                xp.einsum("ie,nif->nef", self.psia[perm, :], walkers.phia.conj())
+                xp.einsum("ie,nif->nef", self.psia[perm, :].conj(), walkers.phia)
             )
             Ga += xp.einsum("nie,nef,jf,n->nji", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)
 
             if self.ndown > 0:
                 inv_Ob = xp.linalg.inv(
-                    xp.einsum("ie,nif->nef", self.psib[perm, :], walkers.phib.conj())
+                    xp.einsum("ie,nif->nef", self.psib[perm, :].conj(), walkers.phib)
                 )
                 Gb += xp.einsum(
                     "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp

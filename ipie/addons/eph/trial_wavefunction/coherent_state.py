@@ -148,7 +148,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         grad : :class:`np.ndarray`
             Gradient of phonon overlap
         """
-        grad = walkers.phonon_disp - self.beta_shift.conj()
+        grad = walkers.phonon_disp - self.beta_shift
         grad *= -self.m * self.w0
         return grad
 
@@ -170,7 +170,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         laplacian: :class:`np.ndarray`
             Laplacian of phonon overlap
         """
-        arg = (walkers.phonon_disp - self.beta_shift.conj()) * self.m * self.w0
+        arg = (walkers.phonon_disp - self.beta_shift) * self.m * self.w0
         arg2 = arg**2
         laplacian = np.sum(arg2, axis=1) - self.nsites * self.m * self.w0
         return laplacian

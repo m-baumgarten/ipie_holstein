@@ -85,7 +85,7 @@ class EnergyEstimator(EstimatorBase):
     def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
-        self._data["ENumer"] = xp.sum(walkers.weight * energy[:, 0].real)
+        self._data["ENumer"] = xp.sum(walkers.weight * energy[:, 0])
         self._data["EDenom"] = xp.sum(walkers.weight)
         self._data["EEl"] = xp.sum(walkers.weight * energy[:, 1].real)
         self._data["EElPh"] = xp.sum(walkers.weight * energy[:, 2].real)

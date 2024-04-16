@@ -61,7 +61,7 @@ class EPhWalkers(BaseWalkers):
         self.weight = numpy.ones(self.nwalkers, dtype=numpy.complex128)
 
         self.phonon_disp = xp.array(
-            [initial_walker[:, 0].copy() for iw in range(self.nwalkers)], dtype=xp.complex128
+            [initial_walker[:, 0].real.copy() for iw in range(self.nwalkers)], dtype=xp.complex128
         )
         self.phonon_disp = numpy.squeeze(self.phonon_disp)
 

@@ -26,9 +26,7 @@ from ipie.propagation.operations import propagate_one_body
 from ipie.propagation.continuous_base import PropagatorTimer
 
 
-def construct_one_body_propagator(
-    hamiltonian: HolsteinModel, dt: float
-) -> Sequence[numpy.ndarray]:
+def construct_one_body_propagator(hamiltonian: HolsteinModel, dt: float) -> Sequence[numpy.ndarray]:
     """Exponentiates the electronic hopping term to apply it later as
     part of the trotterized algorithm.
 
@@ -42,7 +40,7 @@ def construct_one_body_propagator(
     Returns
     -------
     expH1 :
-        
+
     """
     H1 = hamiltonian.T
     expH1 = numpy.array(
@@ -240,30 +238,39 @@ class HolsteinPropagatorFree:
         self.timer.tupdate += time.time() - start_time
 
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
-        
+
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
-    
-        for ip, p in enumerate(phase):
-            if numpy.abs(p) < 0.5 * numpy.pi:
-                magn = numpy.abs(ratio[ip])
-                cosine_fac = numpy.max([0., numpy.cos(p)])
-                walkers.weight[ip] *= magn * cosine_fac
-            else:
-                walkers.weight[ip] = 0.
 
-#        if abs(phase) < 0.5 * math.pi:
-#            (magn, phase) = cmath.polar(ratio)
-#            cosine_fac = max(0, math.cos(phase))
-#            walkers.weight *= magn * cosine_fac
-#        else:
-#            walker.ot = ot_new
-#            walker.weight = 0.0
-        
-#        walkers.weight *= ovlp_new / ovlp
+        # for ip, p in enumerate(phase):
+        #    if numpy.abs(p) < 0.5 * numpy.pi:
+        #        magn = numpy.abs(ratio[ip])
+        #        cosine_fac = numpy.max([0., numpy.cos(p)])
+        #        walkers.weight[ip] *= magn * cosine_fac
+        #    else:
+        #        walkers.weight[ip] = 0.
+
+        abs_phase = numpy.abs(phase)
+        walkers.weight *= numpy.where(
+            abs_phase < 0.5 * numpy.pi,
+            numpy.abs(ratio) * numpy.where(numpy.cos(phase) > 0, numpy.cos(phase), 0.0),
+            0.0,
+        )
+
+    # old
+    #        if abs(phase) < 0.5 * math.pi:
+    #            (magn, phase) = cmath.polar(ratio)
+    #            cosine_fac = max(0, math.cos(phase))
+    #            walkers.weight *= magn * cosine_fac
+    #        else:
+    #            walker.ot = ot_new
+    #            walker.weight = 0.0
+
+    #        walkers.weight *= ovlp_new / ovlp
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
+
 
 class HolsteinPropagator(HolsteinPropagatorFree):
     r"""Propagates walkers by trotterization, employing importance sampling for
@@ -310,7 +317,6 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
         drift = trial.calc_phonon_gradient(walkers)
         walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
-
         ph_ovlp_new = trial.calc_phonon_overlap(walkers)
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
@@ -319,6 +325,7 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
 
         walkers.weight *= ph_ovlp_old / ph_ovlp_new
+
         walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
 
         synchronize()
