@@ -83,6 +83,7 @@ class ToyozawaTrial(CoherentStateTrial):
             Trial energy
         """
         num_energy = 0.0
+        num_ph_energy = 0.0
         denom = 0.0
         # Recover beta from expected position <X> we store as beta_shift
         beta0 = self.beta_shift * np.sqrt(0.5 * ham.m * ham.w0)
@@ -119,14 +120,17 @@ class ToyozawaTrial(CoherentStateTrial):
             G_i = [Ga_i, Gb_i]
 
             kinetic = np.sum(ham.T[0] * G_i[0] + ham.T[1] * G_i[1])
-            e_ph = ham.w0 * np.sum(beta0 * beta_i)
+            e_ph = ham.w0 * np.sum(beta0.conj() * beta_i)
             rho = ham.g_tensor * (G_i[0] + G_i[1])
-            e_eph = np.sum(np.dot(rho, beta0 + beta_i))
+            e_eph = np.sum(np.dot(rho, beta0.conj() + beta_i))
+
             num_energy += np.real((kinetic + e_ph + e_eph) * ov)
+            num_ph_energy += np.real(e_ph * ov)
             denom += np.real(ov)
 
         etrial = num_energy / denom
-        return etrial
+        etrial_ph = num_ph_energy / denom
+        return etrial, etrial_ph
 
     def calc_overlap_perm(self, walkers: EPhWalkers) -> np.ndarray:
         r"""Computes the product of electron and phonon overlaps for each
@@ -198,6 +202,11 @@ class ToyozawaTrial(CoherentStateTrial):
                 + 1j * self.beta_shift[perm].real * self.beta_shift[perm].imag
             )
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
+#            if len(np.where(walkers.ph_ovlp[:, ip]==0)[0]) > 0:
+#                print('disp:    ', walkers.phonon_disp[np.where(walkers.ph_ovlp[:, ip]==0)[0]])
+#                print('ph_ovlp: ', ph_ov)
+#                print('index:   ', np.where(walkers.ph_ovlp[:, ip]==0)[0])
+#                exit()
         return walkers.ph_ovlp
 
     def calc_phonon_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -246,14 +255,24 @@ class ToyozawaTrial(CoherentStateTrial):
         grad : :class:`np.ndarray`
             Phonon gradient
         """
+#        grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
+#        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
+#            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].conj()), ovlp) # TODO conj correct?
+#        grad *= -self.m * self.w0
+#        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ovlp_perm, axis=1))
+#        return grad
+#
         grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
-        for ovlp, perm in zip(walkers.ph_ovlp.T, self.perms):
-            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm]), ovlp) # NOTE this is not yet updated in coherent_state, beta shift should only take real part. 
+        ovlps = walkers.el_ovlp * np.abs(walkers.ph_ovlp)
+        for ovlp, perm in zip(ovlps.T, self.perms):
+            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].real), ovlp) # TODO conj correct?
         grad *= -self.m * self.w0
-        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ph_ovlp, axis=1))
+        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(ovlps, axis=1))
         return grad
 
-    def calc_phonon_laplacian(self, walkers: EPhWalkers, ovlps: np.ndarray) -> np.ndarray:
+
+
+    def calc_phonon_laplacian(self, walkers: EPhWalkers) -> np.ndarray:
         r"""Computes the phonon Laplacian, which weights coherent state laplacians
         by overlaps :math:`o(\sigma, r, X, \tau)` passed to this function,
 
@@ -276,45 +295,43 @@ class ToyozawaTrial(CoherentStateTrial):
             Phonon Laplacian
         """
         laplacian = np.zeros(walkers.nwalkers, dtype=np.complex128)
+        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
+            arg = (walkers.phonon_disp - self.beta_shift[perm].conj()) * self.m * self.w0 # TODO conj correct?
+            arg2 = arg**2
+            laplacian += (np.sum(arg2, axis=1) - self.nsites * self.m * self.w0) * ovlp
+        laplacian /= np.sum(walkers.ovlp_perm, axis=1)
+        return laplacian
+    
+    def calc_phonon_laplacian_imp(self, walkers: EPhWalkers) -> np.ndarray:
+        r"""Computes the phonon Laplacian, which weights coherent state laplacians
+        by overlaps :math:`o(\sigma, r, X, \tau)` passed to this function,
+
+        .. math::
+            \sum_\sigma \frac{\nabla_X \langle \phi(\sigma(\beta)) | X(\tau) \rangle}
+            {\rangle \phi(\sigma(\beta)) | X(\tau) \rangle}
+            = \frac{\sum_sigma ((\sum_i (m \omega (X_i(\tau) - \sigma(\beta)_i))^2) - N m \omega) o(\sigma, r, X, \tau)}
+            {\sum_\sigma o(\sigma, r, X, \tau)}.
+
+        Parameters
+        ----------
+        walkers : :class:`EPhWalkers`
+            EPhWalkers object
+        ovlps : :class:`np.ndarray`
+            Overlaps weighting contributions from permuted coherent states
+
+        Returns
+        -------
+        laplacian : :class:`np.ndarray`
+            Phonon Laplacian
+        """
+        laplacian = np.zeros(walkers.nwalkers, dtype=np.complex128)
+        ovlps = walkers.el_ovlp * np.abs(walkers.ph_ovlp)
         for ovlp, perm in zip(ovlps.T, self.perms):
-            arg = (walkers.phonon_disp - self.beta_shift[perm]) * self.m * self.w0
+            arg = (walkers.phonon_disp - self.beta_shift[perm].real) * self.m * self.w0 # TODO conj correct?
             arg2 = arg**2
             laplacian += (np.sum(arg2, axis=1) - self.nsites * self.m * self.w0) * ovlp
         laplacian /= np.sum(ovlps, axis=1)
         return laplacian
-
-    def calc_phonon_laplacian_importance(self, walkers: EPhWalkers) -> np.ndarray:
-        r"""Computes phonon Laplacian via `calc_phonon_laplacian` with weighting
-        by pure phonon overlap. This is only utilized in the importance sampling
-        of the DMC procedure.
-
-        Parameters
-        ----------
-        walkers : :class:`EPhWalkers`
-            EPhWalkers object
-
-        Returns
-        -------
-        ph_lapl : :class:`np.ndarray`
-            Phonon Laplacian weigthed by phonon overlaps
-        """
-        return self.calc_phonon_laplacian(walkers, walkers.ph_ovlp)
-
-    def calc_phonon_laplacian_locenergy(self, walkers: EPhWalkers) -> np.ndarray:
-        """Computes phonon Laplacian using total overlap weights as required in
-        local energy evaluation.
-
-        Parameters
-        ----------
-        walkers : :class:`EPhWalkers`
-            EPhWalkers object
-
-        Returns
-        -------
-        ph_lapl : :class:`np.ndarray`
-            Phonon Laplacian weigthed by total overlaps
-        """
-        return self.calc_phonon_laplacian(walkers, walkers.ovlp_perm)
 
     def calc_electronic_overlap_perms(self, walkers: EPhWalkers) -> np.ndarray:
         r"""Calculates the electronic overlap of each walker with each permuted
@@ -393,7 +410,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         Ga = np.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=np.complex128)
         Gb = np.zeros_like(Ga)
-
+        
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
             inv_Oa = xp.linalg.inv(
                 xp.einsum("ie,nif->nef", self.psia[perm, :].conj(), walkers.phia)
@@ -407,9 +424,11 @@ class ToyozawaTrial(CoherentStateTrial):
                 Gb += xp.einsum(
                     "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
                 )
-
-        Ga = np.einsum("nij,n->nij", Ga, 1 / walkers.ovlp)
+        
+#        assert np.allclose(walkers.ovlp, np.sum(walkers.ovlp_perm, axis=1))
+        
+        Ga = np.einsum("nij,n->nij", Ga, 1 / np.sum(walkers.ovlp_perm, axis=1))
         if self.ndown > 0:
-            Gb = np.einsum("nij,n->nij", Gb, 1 / walkers.ovlp)
-
+            Gb = np.einsum("nij,n->nij", Gb, 1 / np.sum(walkers.ovlp_perm, axis=1))
+        
         return [Ga, Gb]

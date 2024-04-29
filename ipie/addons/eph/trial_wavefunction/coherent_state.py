@@ -91,7 +91,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         e_eph = np.sum(np.dot(rho, beta0.conj() + beta0))
 
         etrial = kinetic + e_ph + e_eph
-        return etrial
+        return etrial, e_ph
 
     def calc_overlap(self, walkers) -> np.ndarray:
         r"""Computes the product of electron and phonon overlaps,

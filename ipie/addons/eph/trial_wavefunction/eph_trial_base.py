@@ -53,8 +53,8 @@ class EPhTrialWavefunctionBase(metaclass=ABCMeta):
         self.energy = None
 
     def set_etrial(self, ham) -> None:
-        energy = self.calc_energy(ham)
-        self.energy = energy
+        energy, energy_boson = self.calc_energy(ham)
+        self.energy = energy_boson
 
     @abstractmethod
     def calc_energy(self, ham) -> float: ...
