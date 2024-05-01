@@ -215,20 +215,16 @@ class HolsteinPropagatorFree:
         synchronize()
         self.timer.tgf += time.time() - start_time
         
-#        print('I:   ', numpy.min(walkers.weight))
         # Update Walkers
         # a) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
 
-#        print('II:  ', numpy.min(walkers.weight))
         # b) One-body propagation for electrons
         self.propagate_electron(walkers, hamiltonian, trial)
 
-#        print('III: ', numpy.min(walkers.weight))
         # c) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
 
-#        print('IV:  ', numpy.min(walkers.weight))
         # Update weights (and later do phaseless for multi-electron)
         start_time = time.time()
         ovlp_new = trial.calc_overlap(walkers)
@@ -246,33 +242,13 @@ class HolsteinPropagatorFree:
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
 
-#        phases = numpy.load('phases.npy') + numpy.histogram(phase, bins=360)[0]
-#        numpy.save('phases.npy', phases)
-        # for ip, p in enumerate(phase):
-        #    if numpy.abs(p) < 0.5 * numpy.pi:
-        #        magn = numpy.abs(ratio[ip])
-        #        cosine_fac = numpy.max([0., numpy.cos(p)])
-        #        walkers.weight[ip] *= magn * cosine_fac
-        #    else:
-        #        walkers.weight[ip] = 0.
         abs_phase = numpy.abs(phase)
+        cos_phase = numpy.cos(phase)
         walkers.weight *= numpy.where(
             abs_phase < 0.5 * numpy.pi, #<
-            numpy.abs(ratio) * numpy.where(numpy.cos(phase) > 0, numpy.cos(phase), 0.0), #>
+            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
             0.0,
         )
-#        print(phase)
-
-    # old
-    #        if abs(phase) < 0.5 * math.pi:
-    #            (magn, phase) = cmath.polar(ratio)
-    #            cosine_fac = max(0, math.cos(phase))
-    #            walkers.weight *= magn * cosine_fac
-    #        else:
-    #            walker.ot = ot_new
-    #            walker.weight = 0.0
-
-    #        walkers.weight *= ovlp_new / ovlp
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
@@ -312,21 +288,23 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         start_time = time.time()
 
         ovlp_old = trial.calc_overlap(walkers)
+#        ovlp_old = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1) # TODO Remove
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
-        pot -= 0.5 * trial.calc_phonon_laplacian_importance(walkers) / hamiltonian.m
+        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
         pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
-#        print('weight & disp I:   ', walkers.weight[37], walkers.phonon_disp[37])
 
         N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
         drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
         walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
+        
         ovlp_new = trial.calc_overlap(walkers)
+#        ovlp_new = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1)
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
-        pot -= 0.5 * trial.calc_phonon_laplacian_importance(walkers) / hamiltonian.m
+        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
         pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
@@ -334,8 +312,6 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         walkers.weight *= ovlp_old / ovlp_new
 
         walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
-#        print('weight & disp I:   ', walkers.weight[37], walkers.phonon_disp[37], drift[37])
-#        print('drift:   ', trial.calc_phonon_gradient(walkers)[37])
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
