@@ -163,3 +163,47 @@ class EPhWalkers(BaseWalkers):
 
     def reortho_batched(self):  # gpu version
         pass
+
+class EPhCoherentStateWalkers(EPhWalkers):
+
+    def __init__(
+        self,
+        initial_walker: numpy.ndarray,
+        nup: int,
+        ndown: int,
+        nbasis: int,
+        nwalkers: int,
+        verbose: bool = False,
+    ) -> None:
+        super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
+        self.coherent_state_shift = self.phonon_disp
+
+    def build(self, trial):
+        """Allocates memory for computation of overlaps throughout the
+        simulation.
+
+        Parameters
+        ----------
+        trial :
+            Trial wavefunction object.
+        """
+        if hasattr(trial, "nperms"):
+            shape = (self.nwalkers, trial.nperms)
+            shape_G = (self.nwalkers, self.nbasis, self.nbasis, trial.nperms)
+        else:
+            shape = self.nwalkers
+            shape_G = (self.nwalkers, self.nbasis, self.nbasis)
+
+        self.ph_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
+        self.el_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
+        self.ovlp_perm = numpy.zeros(shape, dtype=numpy.complex128)
+
+
+        self.Ga_perm = numpy.zeros(shape_G, dtype=numpy.complex128)
+        self.Gb_perm = numpy.zeros_like(self.Ga_perm)
+
+        self.ovlp = trial.calc_overlap(self)
+
+        self.buff_names += ["ovlp_perm"]
+        self.buff_size = round(self.set_buff_size_single_walker() / float(self.nwalkers))
+        self.walker_buffer = numpy.zeros(self.buff_size, dtype=numpy.complex128)
