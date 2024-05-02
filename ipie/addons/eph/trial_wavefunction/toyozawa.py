@@ -411,20 +411,24 @@ class ToyozawaTrial(CoherentStateTrial):
         Ga = np.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=np.complex128)
         Gb = np.zeros_like(Ga)
         
-        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
+        for ip, (ovlp, perm) in enumerate(zip(walkers.ovlp_perm.T, self.perms)):
             inv_Oa = xp.linalg.inv(
                 xp.einsum("ie,nif->nef", self.psia[perm, :].conj(), walkers.phia)
             )
-            Ga += xp.einsum("nie,nef,jf,n->nji", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)
+            walkers.Ga_perm[:,:,:,ip] = xp.einsum("nie,nef,jf,n->nji", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)
+#            Ga += xp.einsum("nie,nef,jf,n->nji", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)
+            Ga += walkers.Ga_perm[:,:,:,ip]
 
             if self.ndown > 0:
                 inv_Ob = xp.linalg.inv(
                     xp.einsum("ie,nif->nef", self.psib[perm, :].conj(), walkers.phib)
                 )
-                Gb += xp.einsum(
-                    "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
-                )
-        
+                walkers.Gb_perm[:,:,:,ip] = xp.einsum("nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp)
+#                Gb += xp.einsum(
+#                    "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
+ #               )
+                Gb += walkers.Gb_perm[:,:,:,ip] 
+
 #        assert np.allclose(walkers.ovlp, np.sum(walkers.ovlp_perm, axis=1))
         
         Ga = np.einsum("nij,n->nij", Ga, 1 / np.sum(walkers.ovlp_perm, axis=1))

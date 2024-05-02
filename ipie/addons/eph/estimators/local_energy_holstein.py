@@ -13,15 +13,15 @@
 # limitations under the License.
 
 import numpy as np
-
+import plum
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
-from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+from ipie.addons.eph.walkers.eph_walkers import EPhWalkers, EPhCoherentStateWalkers
 
 from ipie.systems.generic import Generic
 from ipie.utils.backend import arraylib as xp
 
-
+@plum.dispatch
 def local_energy_holstein(
     system: Generic,
     hamiltonian: HolsteinModel,
@@ -68,6 +68,31 @@ def local_energy_holstein(
     energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0**2 * np.sum(walkers.phonon_disp**2, axis=1)
     energy[:, 3] -= 0.5 * hamiltonian.nsites * hamiltonian.w0
     energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+
+    energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
+
+    return energy
+
+@plum.dispatch
+def local_energy_holstein(
+    system: Generic,
+    hamiltonian: HolsteinModel,
+    walkers: EPhCoherentStateWalkers,
+    trial: EPhTrialWavefunctionBase,
+) -> np.ndarray:
+
+    energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
+    
+    gf = trial.calc_greens_function(walkers)
+    walkers.Ga, walkers.Gb = gf[0], gf[1]
+
+    energy[:, 1] = np.sum(hamiltonian.T[0] * gf[0], axis=(1, 2))
+    if system.ndown > 0:
+        energy[:, 1] += np.sum(hamiltonian.T[1] * gf[1], axis=(1, 2))
+    
+    energy[:, 2] = -hamiltonian.g * trial.calc_phonon_displacement(walkers)
+    
+    energy[:, 3] = hamiltonian.w0 * trial.calc_harm_osc(walkers) 
 
     energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
 

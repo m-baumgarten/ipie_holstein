@@ -19,12 +19,13 @@ from typing import Sequence
 
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
-from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+from ipie.addons.eph.walkers.eph_walkers import EPhWalkers, EPhCoherentStateWalkers
 
 from ipie.utils.backend import synchronize
 from ipie.propagation.operations import propagate_one_body
 from ipie.propagation.continuous_base import PropagatorTimer
 import matplotlib.pyplot as plt
+
 
 def construct_one_body_propagator(hamiltonian: HolsteinModel, dt: float) -> Sequence[numpy.ndarray]:
     """Exponentiates the electronic hopping term to apply it later as
@@ -102,6 +103,7 @@ class HolsteinPropagatorFree:
             MPIHandler specifying rank and size
         """
         self.expH1 = construct_one_body_propagator(hamiltonian, self.dt)
+        self.const = -numpy.sqrt(2.0 * hamiltonian.m * hamiltonian.w0) * self.dt
         self.const = -numpy.sqrt(2.0 * hamiltonian.m * hamiltonian.w0) * self.dt
         self.w0 = hamiltonian.w0
         self.m = hamiltonian.m
@@ -214,7 +216,7 @@ class HolsteinPropagatorFree:
         walkers.ovlp = ovlp
         synchronize()
         self.timer.tgf += time.time() - start_time
-        
+
         # Update Walkers
         # a) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
@@ -245,8 +247,8 @@ class HolsteinPropagatorFree:
         abs_phase = numpy.abs(phase)
         cos_phase = numpy.cos(phase)
         walkers.weight *= numpy.where(
-            abs_phase < 0.5 * numpy.pi, #<
-            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
+            abs_phase < 0.5 * numpy.pi,  # <
+            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0),  # >
             0.0,
         )
 
@@ -288,24 +290,23 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         start_time = time.time()
 
         ovlp_old = trial.calc_overlap(walkers)
-#        ovlp_old = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1) # TODO Remove
+        #        ovlp_old = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1) # TODO Remove
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
-        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
+        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
 
         N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
         drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
         walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
-        
-        ovlp_new = trial.calc_overlap(walkers)
-#        ovlp_new = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1)
+
+        #        ovlp_new = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1)
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
-        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
+        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
 
@@ -315,3 +316,67 @@ class HolsteinPropagator(HolsteinPropagatorFree):
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
+
+
+class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
+    """"""
+
+    def __init__(self, time_step, verbose=False):
+        super().__init__(time_step, verbose=verbose)
+
+    def propagate_phonons(
+        self,
+        walkers: EPhCoherentStateWalkers,
+        hamiltonian: HolsteinModel,
+        trial: EPhTrialWavefunctionBase,
+    ) -> None:
+        print('prop_ph I:   ', walkers.weight[0])
+        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
+        weight_exponent = -0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1)
+        weight_exponent *= numpy.exp(self.dt * hamiltonian.w0) - 1
+        walkers.weight *= numpy.exp(weight_exponent)
+        print('prop_ph II:   ', walkers.weight[0], numpy.exp(weight_exponent)[0], weight_exponent[0])
+
+    def propagate_electron(
+        self,
+        walkers: EPhCoherentStateWalkers,
+        hamiltonian: HolsteinModel,
+        trial: EPhTrialWavefunctionBase,
+    ) -> None:
+
+        start_time = time.time()
+        synchronize()
+        self.timer.tgf += time.time() - start_time
+
+        print('prop_el I:   ', walkers.weight[0])
+#        walkers.weight /= numpy.sqrt(2 * numpy.pi)
+#        walkers.weight *= numpy.exp(-0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1))
+        print('prop_el II:  ', walkers.weight[0])
+
+        N = numpy.random.normal(loc=0.0, scale=1.0, size=(2, walkers.nwalkers, self.nsites))
+        #N_real = numpy.random.normal(loc=)
+        new_coherent_shift = N[0] + 1j * N[1]
+
+#        walkers.weight *= numpy.exp(
+#            numpy.sum(new_coherent_shift.conj() * walkers.coherent_state_shift, axis=1)
+#        )
+        print('prop_el III: ', walkers.weight[0])
+
+        EPh = self.construct_EPh(walkers, hamiltonian, new_coherent_shift)
+        expEph = numpy.exp(-self.dt * EPh)
+
+        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
+        walkers.phia = numpy.einsum("ni,nie->nie", expEph, walkers.phia)
+        walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
+
+        if walkers.ndown > 0:
+            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
+            walkers.phib = numpy.einsum("ni,nie->nie", expEph, walkers.phib)
+            walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
+
+        walkers.coherent_state_shift += new_coherent_shift
+
+    def construct_EPh(
+        self, walkers: EPhCoherentStateWalkers, hamiltonian: HolsteinModel, new_shift: numpy.ndarray
+    ) -> numpy.ndarray:
+        return -hamiltonian.g * (new_shift.conj()) # - 1j * 2 * walkers.coherent_state_shift.imag)
