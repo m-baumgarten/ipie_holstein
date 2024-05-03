@@ -127,7 +127,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         ph_ovlp : :class:`np.ndarray`
             Overlap of walekr position states with coherent trial state.
         """
-        ph_ovlp = np.exp(-(self.m * self.w0 / 2) * (walkers.phonon_disp - self.beta_shift.real) ** 2 - 1j * self.m * self.w0 * walkers.phonon_disp * self.beta_shift.imag)
+        ph_ovlp = np.exp(-(self.m * self.w0 / 2) * (walkers.phonon_disp - self.beta_shift.real) ** 2 - 1j * self.m * self.w0 * walkers.phonon_disp * self.beta_shift.imag + 1j * self.beta_shift.real * self.beta_shift.imag)
         walkers.ph_ovlp = np.prod(ph_ovlp, axis=1)
         return walkers.ph_ovlp
 

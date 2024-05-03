@@ -202,11 +202,6 @@ class ToyozawaTrial(CoherentStateTrial):
                 + 1j * self.beta_shift[perm].real * self.beta_shift[perm].imag
             )
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
-#            if len(np.where(walkers.ph_ovlp[:, ip]==0)[0]) > 0:
-#                print('disp:    ', walkers.phonon_disp[np.where(walkers.ph_ovlp[:, ip]==0)[0]])
-#                print('ph_ovlp: ', ph_ov)
-#                print('index:   ', np.where(walkers.ph_ovlp[:, ip]==0)[0])
-#                exit()
         return walkers.ph_ovlp
 
     def calc_phonon_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -255,22 +250,20 @@ class ToyozawaTrial(CoherentStateTrial):
         grad : :class:`np.ndarray`
             Phonon gradient
         """
-#        grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
-#        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
-#            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].conj()), ovlp) # TODO conj correct?
-#        grad *= -self.m * self.w0
-#        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ovlp_perm, axis=1))
-#        return grad
-#
         grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
-        ovlps = walkers.el_ovlp * np.abs(walkers.ph_ovlp)
-        for ovlp, perm in zip(ovlps.T, self.perms):
-            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].real), ovlp) # TODO conj correct?
+        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
+            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].conj()), ovlp) # TODO conj correct?
         grad *= -self.m * self.w0
-        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(ovlps, axis=1))
+        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ovlp_perm, axis=1))
         return grad
 
-
+#        grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
+#        ovlps = walkers.el_ovlp * np.abs(walkers.ph_ovlp)
+#        for ovlp, perm in zip(ovlps.T, self.perms):
+#            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].conj()), ovlp) # TODO conj correct?
+#        grad *= -self.m * self.w0
+#        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(ovlps, axis=1))
+#        return grad
 
     def calc_phonon_laplacian(self, walkers: EPhWalkers) -> np.ndarray:
         r"""Computes the phonon Laplacian, which weights coherent state laplacians
@@ -296,7 +289,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         laplacian = np.zeros(walkers.nwalkers, dtype=np.complex128)
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
-            arg = (walkers.phonon_disp - self.beta_shift[perm].real) * self.m * self.w0 # TODO conj correct?
+            arg = (walkers.phonon_disp - self.beta_shift[perm].conj()) * self.m * self.w0 # TODO conj correct?
             arg2 = arg**2
             laplacian += (np.sum(arg2, axis=1) - self.nsites * self.m * self.w0) * ovlp
         laplacian /= np.sum(walkers.ovlp_perm, axis=1)
@@ -424,8 +417,6 @@ class ToyozawaTrial(CoherentStateTrial):
                 Gb += xp.einsum(
                     "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
                 )
-        
-#        assert np.allclose(walkers.ovlp, np.sum(walkers.ovlp_perm, axis=1))
         
         Ga = np.einsum("nij,n->nij", Ga, 1 / np.sum(walkers.ovlp_perm, axis=1))
         if self.ndown > 0:
