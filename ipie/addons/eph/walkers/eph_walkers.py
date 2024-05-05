@@ -58,7 +58,8 @@ class EPhWalkers(BaseWalkers):
 
         super().__init__(nwalkers, verbose=verbose)
 
-        self.weight = numpy.ones(self.nwalkers, dtype=numpy.complex128)
+        self.weight = numpy.ones(self.nwalkers, dtype=numpy.float64)
+        self.phase = numpy.ones(self.nwalkers, dtype=numpy.complex128)
 
         self.phonon_disp = xp.array(
             [initial_walker[:, 0].real.copy() for iw in range(self.nwalkers)], dtype=xp.complex128
@@ -78,7 +79,7 @@ class EPhWalkers(BaseWalkers):
             dtype=xp.complex128,
         )
 
-        self.buff_names += ["phia", "phib", "phonon_disp"]
+        self.buff_names += ["phia", "phib", "phonon_disp", "phase"]
 
         self.buff_size = round(self.set_buff_size_single_walker() / float(self.nwalkers))
         self.walker_buffer = numpy.zeros(self.buff_size, dtype=numpy.complex128)

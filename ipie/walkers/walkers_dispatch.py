@@ -36,7 +36,7 @@ from ipie.walkers.uhf_walkers import (
     UHFWalkersParticleHole,
     UHFWalkersParticleHoleNaive,
 )
-
+from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 
 def get_initial_walker(trial: TrialWavefunctionBase) -> numpy.ndarray:
     if isinstance(trial, SingleDet):
@@ -51,6 +51,9 @@ def get_initial_walker(trial: TrialWavefunctionBase) -> numpy.ndarray:
     elif isinstance(trial, NOCI):
         initial_walker = trial.psi[0].copy()
         num_dets = trial.num_dets
+    elif isinstance(trial, ToyozawaTrial):
+        initial_walker = trial.wavefunction.copy()
+        num_dets = 0.
     else:
         raise Exception("Unrecognized trial type in get_initial_walker")
     return num_dets, initial_walker

@@ -250,6 +250,9 @@ class HolsteinPropagatorFree:
             0.0,
         )
 
+        #        walkers.weight *= numpy.abs(ratio)
+#        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
+
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
 
@@ -309,9 +312,103 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
 
-        walkers.weight *= ovlp_old / ovlp_new
+        ratio = ovlp_old / ovlp_new
+        walkers.weight *= numpy.abs(ratio)
+        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
 
         walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
+
+        synchronize()
+        self.timer.tgemm += time.time() - start_time
+
+class FreePropagationHolstein(HolsteinPropagator):
+    def __init__(self, timestep: float, verbose: bool = False, exp_nmax: int = 10, ene_0: float = 0.) -> None:
+        super().__init__(timestep, verbose)
+        self.exp_nmax = exp_nmax
+        self.eshift = ene_0
+
+#    def propagate_phonons(self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase):
+#        """Propagates phonons via Diffusion MC including drift term."""
+#        start_time = time.time()
+#
+#        ovlp_old = trial.calc_overlap(walkers)
+##        ovlp_old = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1) # TODO Remove
+#
+#        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+#        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+#        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
+#        pot = numpy.real(pot)
+#        walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
+#
+#        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+#        drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
+#        walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
+#        
+#        ovlp_new = trial.calc_overlap(walkers)
+##        ovlp_new = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1)
+#
+#        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+#        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+#        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
+#        pot = numpy.real(pot)
+#        walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
+#
+#        ratio = ovlp_old / ovlp_new
+#        walkers.weight *= numpy.abs(ratio)
+#        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
+#
+#        walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
+#
+#        synchronize()
+#        self.timer.tgemm += time.time() - start_time
+#
+#    def propagate_electron(self): ...
+        
+    def update_weight(self, walkers, ovlp, ovlp_new):
+        ratio = ovlp_new / ovlp
+        magn, dtheta = numpy.abs(ratio), numpy.angle(ratio)
+        walkers.weight *= magn
+        walkers.phase *= numpy.exp(1j * dtheta)
+        walkers.ovlp = ovlp_new
+
+    def propagate_phonons(
+        self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase
+    ) -> None:
+        r"""Propagates phonon displacements by adjusting weigths according to
+        bosonic on-site energies and sampling the momentum contribution, again
+        by trotterizing the phonon propagator.
+
+        .. math::
+            \mathrm{e}^{-\Delta \tau \hat{H}_{\mathrm{ph}} / 2} \approx
+            \mathrm{e}^{\Delta \tau N \omega / 4}
+            \mathrm{e}^{-\Delta \tau \sum_i m \omega \hat{X}_i^2 / 8}
+            \mathrm{e}^{-\Delta \tau \sum_i \hat{P}_i^2 / (4 \omega)}
+            \mathrm{e}^{-\Delta \tau \sum_i m \omega \hat{X}_i^2 / 8}
+
+        One can obtain the sampling prescription by insertion of resolutions of
+        identity, :math:`\int dX |X\rangle \langleX|, and performin the resulting
+        Fourier transformation.
+
+        Parameters
+        ----------
+        walkers :
+            Walkers class
+        """
+        start_time = time.time()
+
+        pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+        pot = numpy.real(pot)
+        walkers.weight *= numpy.exp(-self.dt_ph * pot)
+
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        walkers.phonon_disp = walkers.phonon_disp + N
+
+        pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+        pot = numpy.real(pot)
+        walkers.weight *= numpy.exp(-self.dt_ph * pot)
+
+        # Does not matter for estimators but helps with population control
+        walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2)
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
