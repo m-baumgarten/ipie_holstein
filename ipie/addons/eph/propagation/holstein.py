@@ -218,9 +218,15 @@ class HolsteinPropagatorFree:
         # Update Walkers
         # a) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
+ #       ovlp_new = trial.calc_overlap(walkers)
+ #       self.update_weight(walkers, ovlp, ovlp_new)
+ #       ovlp = ovlp_new
 
         # b) One-body propagation for electrons
         self.propagate_electron(walkers, hamiltonian, trial)
+#        ovlp_new = trial.calc_overlap(walkers)
+#        self.update_weight(walkers, ovlp, ovlp_new)
+#        ovlp = ovlp_new
 
         # c) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
@@ -242,16 +248,16 @@ class HolsteinPropagatorFree:
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
 
-        abs_phase = numpy.abs(phase)
-        cos_phase = numpy.cos(phase)
-        walkers.weight *= numpy.where(
-            abs_phase < 0.5 * numpy.pi, #<
-            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
-            0.0,
-        )
+#        abs_phase = numpy.abs(phase)
+#        cos_phase = numpy.cos(phase)
+#        walkers.weight *= numpy.where(
+#            abs_phase < 0.5 * numpy.pi, #<
+#            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
+#            0.0,
+#        )
 
-        #        walkers.weight *= numpy.abs(ratio)
-#        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
+        walkers.weight *= numpy.abs(ratio)
+        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
@@ -354,7 +360,6 @@ class FreePropagationHolstein(HolsteinPropagator):
         walkers.phase *= numpy.exp(-self.dt_ph * pot_imag / 2)
 
         ratio = ovlp_old / ovlp_new.conj()
-#        ratio = 1 / ovlp_new
         walkers.weight *= numpy.abs(ratio)
         walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
 
