@@ -227,8 +227,10 @@ class HolsteinPropagatorFree:
 
         # Update weights (and later do phaseless for multi-electron)
         start_time = time.time()
+        
         ovlp_new = trial.calc_overlap(walkers)
         walkers.ovlp = ovlp_new
+        
         synchronize()
         self.timer.tovlp += time.time() - start_time
 
@@ -309,9 +311,65 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
 
-        walkers.weight *= ovlp_old / ovlp_new
+#        walkers.weight *= ovlp_old / ovlp_new
 
         walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
+
+    def propagate_walkers(
+        self,
+        walkers: EPhWalkers,
+        hamiltonian: HolsteinModel,
+        trial: EPhTrialWavefunctionBase,
+        eshift: float = None,
+    ) -> None:
+        r"""Propagates walkers by trotterized propagator.
+
+        Parameters
+        ----------
+        walkers :
+            EPhWalkers object
+        hamiltonian :
+            HolsteinModel object
+        trial :
+            EPhTrialWavefunctionBase object
+        eshift :
+            Only purpose is compatibility with AFQMC object, irrelevant for
+            propagation
+        """
+        synchronize()
+        start_time = time.time()
+        synchronize()
+        self.timer.tgf += time.time() - start_time
+        
+        # Update Walkers
+        # a) DMC for phonon degrees of freedom
+        self.propagate_phonons(walkers, hamiltonian, trial)
+
+        # b) One-body propagation for electrons
+        ovlp = trial.calc_overlap(walkers)
+        self.propagate_electron(walkers, hamiltonian, trial)
+        ovlp_new = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp_new
+        self.update_weight(walkers, ovlp, ovlp_new)
+        ovlp = ovlp_new
+
+        # c) DMC for phonon degrees of freedom
+        self.propagate_phonons(walkers, hamiltonian, trial)
+
+        # Update weights (and later do phaseless for multi-electron)
+        start_time = time.time()
+        
+        ovlp_new = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp_new
+        
+        synchronize()
+        self.timer.tovlp += time.time() - start_time
+
+        start_time = time.time()
+        synchronize()
+        self.timer.tupdate += time.time() - start_time
+
+
