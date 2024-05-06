@@ -67,7 +67,7 @@ params = QMCParamsFP(
     pop_control_freq=-1,
     num_iterations_fp=num_iterations_fp,
 )
-propagator = FreePropagationHolstein(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=0.)
+propagator = FreePropagationHolstein(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.46968)
 propagator.build(ham, trial, walkers)
 
 fpafqmc = FPAFQMC(
