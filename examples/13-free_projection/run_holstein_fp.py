@@ -30,10 +30,10 @@ K = np.linspace(0, np.pi, nk, endpoint=True)[k]
 
 # Walker Parameters & Setup
 comm = MPI.COMM_WORLD
-nwalkers = 10
+nwalkers = 30
 num_iterations_fp = 100
-num_blocks = 15
-num_steps_per_block = 40
+num_blocks = 100
+num_steps_per_block = 10
 
 # System and Hamiltonian setup
 system = Generic(nelec)
@@ -86,10 +86,14 @@ if comm.rank == 0:
     from ipie.addons.free_projection.analysis.extraction import extract_observable
     from ipie.addons.free_projection.analysis.jackknife import jackknife_ratios
 
+    data = np.zeros((fpafqmc.params.num_blocks, 3), dtype=np.complex128)
     for i in range(fpafqmc.params.num_blocks):
+        data[i, 0] = (i+1) * fpafqmc.params.num_steps_per_block * fpafqmc.params.timestep
         print(
             f"\nEnergy statistics at time {(i+1) * fpafqmc.params.num_steps_per_block * fpafqmc.params.timestep}:"
         )
         qmc_data = extract_observable(fpafqmc.estimators[i].filename, "energy")
         energy_mean, energy_err = jackknife_ratios(qmc_data["ENumer"], qmc_data["EDenom"])
+        data[i, 1], data[i, 2] = energy_mean, energy_err
         print(f"Energy: {energy_mean:.8e} +/- {energy_err:.8e}")
+    np.save('fp_data_3000walkers.npy', data)

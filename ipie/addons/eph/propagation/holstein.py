@@ -359,11 +359,11 @@ class FreePropagationHolstein(HolsteinPropagator):
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
         walkers.phase *= numpy.exp(-self.dt_ph * pot_imag / 2)
 
-        ratio = ovlp_old / ovlp_new.conj()
-        walkers.weight *= numpy.abs(ratio)
-        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
+#        ratio = ovlp_old / ovlp_new
+#        walkers.weight *= numpy.abs(ratio)
+#        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
 
-        walkers.weight *= numpy.exp(self.dt_ph * self.eshift)#trial.energy)
+#        walkers.weight *= numpy.exp(self.dt_ph * self.eshift)#trial.energy)
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
@@ -372,11 +372,11 @@ class FreePropagationHolstein(HolsteinPropagator):
         
     def update_weight(self, walkers, ovlp, ovlp_new):
         walkers.weight *= numpy.exp(self.dt * self.eshift)
-        ratio = ovlp_new / ovlp
-        magn, dtheta = numpy.abs(ratio), numpy.angle(ratio)
-        walkers.weight *= magn
-        walkers.phase *= numpy.exp(1j * dtheta)
-        walkers.ovlp = ovlp_new
+#        ratio = ovlp_new / ovlp
+#        magn, dtheta = numpy.abs(ratio), numpy.angle(ratio)
+#        walkers.weight *= magn
+#        walkers.phase *= numpy.exp(1j * dtheta)
+#        walkers.ovlp = ovlp_new
 
 #    def propagate_phonons(
 #        self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase

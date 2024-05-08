@@ -351,16 +351,18 @@ class ToyozawaTrial(CoherentStateTrial):
             )
             sign_a, log_ovlp_a = xp.linalg.slogdet(ovlp_a)
 
+            ot = coeff.conj() * sign_a * xp.exp(log_ovlp_a - walkers.log_shift)
             if self.ndown > 0:
                 ovlp_b = xp.einsum(
                     "mi,wmj->wij", self.psib[perm, :].conj(), walkers.phib, optimize=True
                 )
                 sign_b, log_ovlp_b = xp.linalg.slogdet(ovlp_b)
-                ot = sign_a * sign_b * xp.exp(log_ovlp_a + log_ovlp_b - walkers.log_shift)
-            else:
-                ot = sign_a * xp.exp(log_ovlp_a - walkers.log_shift)
+                ot *= sign_b * xp.exp(log_ovlp_b)
+                #sign_a * sign_b * xp.exp(log_ovlp_a + log_ovlp_b - walkers.log_shift)
+#            else:
+#                ot = sign_a * xp.exp(log_ovlp_a - walkers.log_shift)
 
-            ot *= coeff.conj()
+#            ot *= coeff.conj()
 
             walkers.el_ovlp[:, ip] = ot
         return walkers.el_ovlp
