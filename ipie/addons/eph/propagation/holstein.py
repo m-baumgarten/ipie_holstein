@@ -218,15 +218,10 @@ class HolsteinPropagatorFree:
         # Update Walkers
         # a) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
- #       ovlp_new = trial.calc_overlap(walkers)
- #       self.update_weight(walkers, ovlp, ovlp_new)
- #       ovlp = ovlp_new
 
         # b) One-body propagation for electrons
+#        ovlp = trial.calc_overlap(walkers)
         self.propagate_electron(walkers, hamiltonian, trial)
-#        ovlp_new = trial.calc_overlap(walkers)
-#        self.update_weight(walkers, ovlp, ovlp_new)
-#        ovlp = ovlp_new
 
         # c) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
@@ -247,14 +242,6 @@ class HolsteinPropagatorFree:
 
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
-
-#        abs_phase = numpy.abs(phase)
-#        cos_phase = numpy.cos(phase)
-#        walkers.weight *= numpy.where(
-#            abs_phase < 0.5 * numpy.pi, #<
-#            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
-#            0.0,
-#        )
 
         walkers.weight *= numpy.abs(ratio)
         walkers.phase *= numpy.exp(1j * numpy.angle(phase))
@@ -359,16 +346,8 @@ class FreePropagationHolstein(HolsteinPropagator):
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
         walkers.phase *= numpy.exp(-self.dt_ph * pot_imag / 2)
 
-#        ratio = ovlp_old / ovlp_new
-#        walkers.weight *= numpy.abs(ratio)
-#        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
-
-#        walkers.weight *= numpy.exp(self.dt_ph * self.eshift)#trial.energy)
-
         synchronize()
         self.timer.tgemm += time.time() - start_time
-#
-#    def propagate_electron(self): ...
         
     def update_weight(self, walkers, ovlp, ovlp_new):
         walkers.weight *= numpy.exp(self.dt * self.eshift)
