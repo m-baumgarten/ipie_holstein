@@ -406,18 +406,22 @@ class ToyozawaTrial(CoherentStateTrial):
         
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
             inv_Oa = xp.linalg.inv(
-                xp.einsum("ie,nif->nef", self.psia[perm, :].conj(), walkers.phia)
+                xp.einsum("nie,if->nef", walkers.phia, self.psia[perm, :].conj())
             )
-            Ga += xp.einsum("nie,nef,jf,n->nji", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)
+#            Ga += xp.einsum("nie,nef,jf,n->nij", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)    #flip ij in the end TODO
+            Ga += xp.einsum("ie,nef,njf,n->nij", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
 
             if self.ndown > 0:
                 inv_Ob = xp.linalg.inv(
-                    xp.einsum("ie,nif->nef", self.psib[perm, :].conj(), walkers.phib)
+                    xp.einsum("nie,if->nef", walkers.phib, self.psib[perm, :].conj())
                 )
                 Gb += xp.einsum(
-                    "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
+                    "ie,nef,njf,n->nij", self.psib[perm].conj(), inv_Ob, walkers.phia, ovlp
                 )
         
+#        print('Ga:  ', Ga, '\nGa_swap:  ', np.swapaxes(Ga, 1, 2))
+#        assert (np.allclose(Ga, np.swapaxes(Ga, 1, 2)))
+
         Ga = np.einsum("nij,n->nij", Ga, 1 / np.sum(walkers.ovlp_perm, axis=1))
         if self.ndown > 0:
             Gb = np.einsum("nij,n->nij", Gb, 1 / np.sum(walkers.ovlp_perm, axis=1))

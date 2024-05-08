@@ -76,7 +76,6 @@ class HolsteinPropagatorFree:
         self.verbose = verbose
         self.timer = PropagatorTimer()
 
-        self.sqrt_dt = self.dt**0.5
         self.dt_ph = 0.5 * self.dt
         self.mpi_handler = None
 
@@ -251,6 +250,10 @@ class HolsteinPropagatorFree:
             numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
             0.0,
         )
+        
+#        walkers.phia = numpy.einsum('nie,n->nie', walkers.phia, numpy.exp(-1j * phase))
+#        if walkers.ndown > 0:
+#            walkers.phib = numpy.einsum('nie,n->nie', walkers.phib, numpy.exp(-1j * phase))
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
@@ -289,8 +292,8 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         """Propagates phonons via Diffusion MC including drift term."""
         start_time = time.time()
 
-        ovlp_old = trial.calc_overlap(walkers)
-#        ovlp_old = numpy.sum(walkers.el_ovlp * numpy.abs(walkers.ph_ovlp), axis=1) # TODO Remove
+        ovlp_old = trial.calc_overlap(walkers) #walkers.ovlp
+       # walkers.ovlp =
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
