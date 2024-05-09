@@ -121,7 +121,7 @@ class ToyozawaVariational(Variational):
     def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
-        X = shift + beta_i
+        X = shift.conj() + beta_i
         displ = npj.array(ham.X_connectivity).dot(X)
         displ_mat = npj.diag(displ[:-1], 1)
         displ_mat += displ_mat.T
@@ -134,7 +134,7 @@ class ToyozawaVariational(Variational):
             tmp0 += ham.g_tensor * G[1] * displ_mat
         el_ph_contrib = jax.numpy.sum(tmp0)
 
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_i)
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
 
@@ -142,12 +142,12 @@ class ToyozawaVariational(Variational):
     def variational_energy(self, ham: BondSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
-        X = shift + beta_i
+        X = shift.conj() + beta_i
         tmp0 = ham.g_tensor * G[0] * X
         if self.sys.ndown > 0:
             tmp0 += ham.g_tensor * G[1] * X
         el_ph_contrib = 2 * jax.numpy.sum(tmp0)
 
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift * beta_i)
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
