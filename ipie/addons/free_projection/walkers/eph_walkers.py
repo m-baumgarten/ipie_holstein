@@ -53,6 +53,9 @@ class EPhWalkersFP(EPhWalkers):
             for iw in range(self.nwalkers):
                 (self.phia[iw], Rup) = qr(self.phia[iw], mode=qr_mode)
                 det_i = xp.prod(xp.diag(Rup))
+                if det_i < 0:
+                    det_i *= -1
+                    self.phia[iw] *= -1
 
                 if ndown > 0:
                     (self.phib[iw], Rdn) = qr(self.phib[iw], mode=qr_mode)

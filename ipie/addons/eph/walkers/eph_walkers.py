@@ -78,8 +78,8 @@ class EPhWalkers(BaseWalkers):
             ],
             dtype=xp.complex128,
         )
-
-        self.buff_names += ["phia", "phib", "phonon_disp", "phase"]
+        
+        self.buff_names += ["phia", "phib", "phonon_disp"]
 
         self.buff_size = round(self.set_buff_size_single_walker() / float(self.nwalkers))
         self.walker_buffer = numpy.zeros(self.buff_size, dtype=numpy.complex128)

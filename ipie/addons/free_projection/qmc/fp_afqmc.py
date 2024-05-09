@@ -39,6 +39,8 @@ from ipie.addons.free_projection.walkers.eph_walkers import EPhWalkersFP
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 
+from ipie.walkers.pop_controller import PopController
+
 class FPAFQMC(AFQMC):
     """Free projection AFQMC driver."""
 
@@ -157,6 +159,7 @@ class FPAFQMC(AFQMC):
             rng_seed=seed,
             num_iterations_fp=num_iterations_fp,
         )
+        
         return FPAFQMC(
             driver.system,
             driver.hamiltonian,
@@ -166,6 +169,7 @@ class FPAFQMC(AFQMC):
             params,
             verbose=(verbose and comm.rank == 0),
         )
+
 
     @staticmethod
     # TODO: wavefunction type, trial type, hamiltonian type
@@ -309,6 +313,13 @@ class FPAFQMC(AFQMC):
         self.setup_timers()
         eshift = 0.0
         self.walkers.orthogonalise()
+        
+        self.pcontrol = PopController(
+            self.params.num_walkers,
+            self.params.num_steps_per_block,
+            self.mpi_handler,
+            verbose=self.verbose,
+        ) 
 
         self.get_env_info()
         self.copy_to_gpu()
@@ -358,6 +369,9 @@ class FPAFQMC(AFQMC):
                 self.propagator.propagate_walkers(
                     self.walkers, self.hamiltonian, self.trial, eshift
                 )
+
+                if step % self.params.pop_control_freq == 0:     
+                    self.pcontrol.pop_control(self.walkers, comm)
 
                 self.tprop_ovlp = self.propagator.timer.tovlp
                 self.tprop_update = self.propagator.timer.tupdate
