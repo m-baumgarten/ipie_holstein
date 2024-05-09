@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import numpy
-from typing import Sequence
+from typing import Sequence, Union
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 
 class HolsteinModel(GenericEPhModel):
@@ -46,7 +46,7 @@ class HolsteinModel(GenericEPhModel):
         employed.
     """
 
-    def __init__(self, g: float, t: float, w0: float, nsites: int, pbc: bool):
+    def __init__(self, g: float, t: float, w0: float, nsites: Union[int, numpy.ndarray], pbc: bool):
         super().__init__(nsites, pbc)
         self.g = g
         self.t = t
@@ -60,21 +60,40 @@ class HolsteinModel(GenericEPhModel):
         self.T = self.build_T()
         self.g_tensor = self.build_g()
 
-    def build_T(self) -> Sequence[numpy.ndarray]:
-        """Constructs electronic hopping matrix."""
-        T = numpy.diag(numpy.ones(self.nsites - 1), 1)
-        T += numpy.diag(numpy.ones(self.nsites - 1), -1)
-
+    def build_T_1D(self, nsites) -> Sequence[numpy.ndarray]:
+        T = numpy.diag(numpy.ones(nsites - 1), 1)
+        T += numpy.diag(numpy.ones(nsites - 1), -1)
         if self.pbc:
             T[0, -1] = T[-1, 0] = 1.0
-
         T *= -self.t
+        return T
+
+    def build_T(self) -> Sequence[numpy.ndarray]:
+        """Constructs electronic hopping matrix."""
+        if self.dim == 1:
+            T = self.build_T_1D(self.nsites[0]) 
+
+        if self.dim == 2:
+            Tx = self.build_T_1D(self.nsites[0])
+            Ty = self.build_T_1D(self.nsites[1])
+            Ix = numpy.eye(self.nsites[0])
+            Iy = numpy.eye(self.nsites[1])
+            T = numpy.kron(Tx, Iy) + numpy.kron(Ix, Ty)
+
+        if self.dim == 3:
+            Tx = self.build_T_1D(self.nsites[0])
+            Ty = self.build_T_1D(self.nsites[1])
+            Tz = self.build_T_1D(self.nsites[2])
+            Ix = numpy.eye(self.nsites[0])
+            Iy = numpy.eye(self.nsites[1])
+            Iz = numpy.eye(self.nsites[2])
+            T = numpy.kron(Tx, Iy, Iz) + numpy.kron(Ix, Ty, Iz) + numpy.kron(Ix, Iy, Tz)
 
         T = [T.copy(), T.copy()]
         return T
 
     def build_g(self) -> numpy.ndarray:
         """Constructs the electron-phonon tensor. For the Holstein model"""
-        g_tensor = -self.g * numpy.eye(self.nsites)
+        g_tensor = -self.g * numpy.eye(self.N)
         return g_tensor
 

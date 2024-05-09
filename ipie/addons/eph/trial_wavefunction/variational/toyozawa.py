@@ -24,8 +24,14 @@ import plum
 
 from ipie.addons.eph.trial_wavefunction.variational.variational import Variational
 
+def circ_perm_1D(sites: int) -> np.ndarray:
+    circs = sites
+    for shift in range(1, sites):
+        new_circ = np.roll(sites, -shift)
+        circs = np.vstack([circs, new_circ])
+    return circs
 
-def circ_perm(lst: np.ndarray) -> np.ndarray:
+def circ_perm(hamiltonian) -> np.ndarray:
     """Returns a matrix which rows consist of all possible
     cyclic permutations given an initial array lst.
 
@@ -34,12 +40,55 @@ def circ_perm(lst: np.ndarray) -> np.ndarray:
     lst :
         Initial array which is to be cyclically permuted
     """
-    circs = lst
-    for shift in range(1, len(lst)):
-        new_circ = np.roll(lst, -shift)
-        circs = np.vstack([circs, new_circ])
-    return circs
+    nsites = hamiltonian.nsites
+    perms = np.zeros(hamiltonian.N**2)
+    lattice = np.arange(hamiltonian.N).reshape(nsites)
+    
+    if hamiltonian.dim == 1:
+        perms_x = circ_perm_1D(nsites[0]) 
+        return perms_x
 
+    elif hamiltonian.dim == 2:
+        perms_x = circ_perm_1D(nsites[0])
+        perms_y = circ_perm_1D(nsites[1])
+        for xi, perm_x in enumerate(perms_x):
+            for yi, perm_y in enumerate(perms_y):
+                index = xi * nsites[1] + yi
+                perms[index, :] = lattice[perm_x, perm_y].reshape(hamiltonian.N)
+        return perms
+    
+    elif hamiltonian.dim == 3:
+        perms_x = circ_perm_1D(nsites[0])
+        perms_y = circ_perm_1D(nsites[1])
+        perms_z = circ_perm_1D(nsites[2])
+        for xi, perm_x in enumerate(perms_x):
+            for yi, perm_y in enumerate(perms_y):
+                for zi, perm_z in enumerate(perms_z):
+                    index = xi * nsites[1] * nsites[2] + yi * nsites[2] + zi
+                    perms[index, :] = lattice[perm_x, perm_y, perm_z].reshape(hamiltonian.N)
+    
+    return perms
+
+def get_kcoeffs(hamiltonian, K):
+    """"""
+    nsites = hamiltonian.nsites
+
+    if hamiltonian.dim == 1:
+        exponent = 1j * K[0] * np.arange(hamiltonian.nsites[0])
+        
+    elif hamiltonian.dim == 2:
+        coeff_x = K[0] * np.arange(hamiltonian.nsites[0])
+        coeff_y = K[1] * np.arange(hamiltonian.nsites[1])
+        exponent = np.array([1j * (cx + cy) for cx in coeff_x for cy in coeff_y])
+
+    elif hamiltonian.dim == 3:
+        coeff_x = K[0] * np.arange(hamiltonian.nsites[0])
+        coeff_y = K[1] * np.arange(hamiltonian.nsites[1])
+        coeff_z = K[2] * np.arange(hamiltonian.nsites[2])
+        exponent = np.array([1j * (cx + cy + cz) for cx in coeff_x for cy in coeff_y for cz in coeff_z])
+
+    Kcoeffs = np.exp(exponent)
+    return Kcoeffs
 
 class ToyozawaVariational(Variational):
     def __init__(
@@ -48,14 +97,17 @@ class ToyozawaVariational(Variational):
         electron_init: np.ndarray,
         hamiltonian,
         system,
-        K: float = 0.0,
+        K: Union[float, np.ndarray],
         cplx: bool = True,
     ):
         super().__init__(shift_init, electron_init, hamiltonian, system, cplx)
-        self.K = K
-        self.perms = circ_perm(np.arange(hamiltonian.nsites))
+        if isinstance(K, float):
+            self.K = np.array([K])
+        else:
+            self.K = K
+        self.perms = circ_perm(hamiltonian)
         self.nperms = self.perms.shape[0]
-        self.Kcoeffs = np.exp(1j * K * np.arange(hamiltonian.nsites))
+        self.Kcoeffs = get_kcoeffs(hamiltonian, K)
 
     def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
@@ -116,7 +168,6 @@ class ToyozawaVariational(Variational):
         projected_energy = kinetic + el_ph_contrib + phonon_contrib
         return projected_energy
 
-    ### not yet complexificated
     @plum.dispatch
     def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])

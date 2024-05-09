@@ -56,7 +56,7 @@ class CoherentStateVariational(Variational):
     def variational_energy(self, ham: HolsteinModel, G: list, shift):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         rho = G[0].diagonal() + G[1].diagonal()
-        el_ph_contrib = -self.ham.g * np.sum(rho * 2 * shift.real)
+        el_ph_contrib = -self.ham.g * np.sum(rho * 2 * shift.T.real)
         phonon_contrib = ham.w0 * np.sum(shift.conj() * shift)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
