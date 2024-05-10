@@ -242,15 +242,21 @@ class HolsteinPropagatorFree:
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
 
         ratio = ovlp_new / ovlp
+        print('ratio:   ', ratio[0])
         phase = numpy.angle(ratio)
-
+        import matplotlib.pyplot as plt
+        plt.plot(numpy.sort(ratio.real))
+        plt.plot(numpy.sort(ratio.imag))
+        plt.show()
         abs_phase = numpy.abs(phase)
         cos_phase = numpy.cos(phase)
+        print('update I:   ', walkers.weight[0])
         walkers.weight *= numpy.where(
             abs_phase < 0.5 * numpy.pi,  # <
             numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0),  # >
             0.0,
         )
+        print('update II:   ', walkers.weight[0])
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
@@ -349,17 +355,11 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
         self.timer.tgf += time.time() - start_time
 
         print('prop_el I:   ', walkers.weight[0])
-#        walkers.weight /= numpy.sqrt(2 * numpy.pi)
-#        walkers.weight *= numpy.exp(-0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1))
         print('prop_el II:  ', walkers.weight[0])
 
         N = numpy.random.normal(loc=0.0, scale=1.0, size=(2, walkers.nwalkers, self.nsites))
-        #N_real = numpy.random.normal(loc=)
         new_coherent_shift = N[0] + 1j * N[1]
 
-#        walkers.weight *= numpy.exp(
-#            numpy.sum(new_coherent_shift.conj() * walkers.coherent_state_shift, axis=1)
-#        )
         print('prop_el III: ', walkers.weight[0])
 
         EPh = self.construct_EPh(walkers, hamiltonian, new_coherent_shift)
@@ -373,10 +373,15 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
             walkers.phib = numpy.einsum("ni,nie->nie", expEph, walkers.phib)
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
-
+        
+        weight_exp1 = numpy.einsum('ni,ni->n', new_coherent_shift.real, walkers.coherent_state_shift.imag)
+        weight_exp2 = numpy.einsum('ni,ni->n', new_coherent_shift.imag, walkers.coherent_state_shift.real)
+#        walkers.weight *= numpy.exp(1j * (new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real))
+        walkers.phia = numpy.einsum('nie,n->nie', walkers.phia, numpy.exp(1j * (weight_exp1 - weight_exp2)))
         walkers.coherent_state_shift += new_coherent_shift
+        print('prop_el IV: ', walkers.weight[0])
 
     def construct_EPh(
         self, walkers: EPhCoherentStateWalkers, hamiltonian: HolsteinModel, new_shift: numpy.ndarray
     ) -> numpy.ndarray:
-        return -hamiltonian.g * (new_shift.conj()) # - 1j * 2 * walkers.coherent_state_shift.imag)
+        return -hamiltonian.g * (new_shift.conj() + 2 * walkers.coherent_state_shift.real)
