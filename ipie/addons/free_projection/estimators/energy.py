@@ -34,8 +34,8 @@ class EnergyEstimatorFP(EnergyEstimator):
         trial.calc_greens_function(walkers)
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
-        self._data["ENumer"] = xp.sum(walkers.weight * walkers.phase * energy[:, 0]) # * walkers.ovlp
-        self._data["EDenom"] = xp.sum(walkers.weight * walkers.phase) # * walkers.ovlp
+        self._data["ENumer"] = xp.sum(walkers.weight * walkers.phase * energy[:, 0] * walkers.ovlp) # * walkers.ovlp
+        self._data["EDenom"] = xp.sum(walkers.weight * walkers.phase * walkers.ovlp) # * walkers.ovlp
         self._data["E1Body"] = xp.sum(walkers.weight * walkers.phase * walkers.ovlp * energy[:, 1])
         self._data["E2Body"] = xp.sum(walkers.weight * walkers.phase * walkers.ovlp * energy[:, 2])
 

@@ -24,7 +24,7 @@ w0 = 1.0
 nsites = 32
 pbc = True
 #K = 2 * k * np.pi / nsites
-k = 0
+k = 15
 nk = nsites//2 + 1 #sum(divmod(nsites+1, 2))
 K = np.linspace(0, np.pi, nk, endpoint=True)[k]
 
