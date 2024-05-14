@@ -17,6 +17,7 @@ from typing import List, Union, Tuple
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
 from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
 import jax
 import jax.numpy as npj
@@ -116,7 +117,6 @@ class ToyozawaVariational(Variational):
         projected_energy = kinetic + el_ph_contrib + phonon_contrib
         return projected_energy
 
-    ### not yet complexificated
     @plum.dispatch
     def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
@@ -139,7 +139,7 @@ class ToyozawaVariational(Variational):
         return local_energy
 
     @plum.dispatch
-    def variational_energy(self, ham: BondSSHModel, G: list, shift, beta_i):
+    def projected_energy(self, ham: BondSSHModel, G: list, shift, beta_i):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
         X = shift.conj() + beta_i
@@ -148,6 +148,16 @@ class ToyozawaVariational(Variational):
             tmp0 += ham.g_tensor * G[1] * X
         el_ph_contrib = 2 * jax.numpy.sum(tmp0)
 
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
+        local_energy = kinetic + el_ph_contrib + phonon_contrib
+        return local_energy
+
+    @plum.dispatch
+    def projected_energy(self, ham: Union[HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric], G: list, shift, beta_i):
+        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
+        el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
+        if self.sys.ndown > 0:
+            el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
         phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy

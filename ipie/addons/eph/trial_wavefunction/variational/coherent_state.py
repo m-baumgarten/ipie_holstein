@@ -17,6 +17,7 @@ from typing import List, Union
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
 from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
 import jax
 import jax.numpy as npj
@@ -100,3 +101,14 @@ class CoherentStateVariational(Variational):
         phonon_contrib = ham.w0 * jax.numpy.sum(shift * shift)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
+
+    @plum.dispatch
+    def variational_energy(self, ham: Union[HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric], G: list, shift):
+        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
+        el_ph_contrib = npj.einsum('ijk,ij,k', ham.g_tensor, G[0], 2 * shift.real)
+        if self.sys.ndown > 0:
+            el_ph_contrib += npj.einsum('ijk,ij,k', ham.g_tensor, G[1], 2 * shift.real)
+        phonon_contrib = ham.w0 * npj.sum(shift.conj() * shift)
+        local_energy = kinetic + el_ph_contrib + phonon_contrib
+        return local_energy
+
