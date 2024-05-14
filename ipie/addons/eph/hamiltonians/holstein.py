@@ -75,6 +75,9 @@ class HolsteinModel(GenericEPhModel):
 
     def build_g(self) -> numpy.ndarray:
         """Constructs the electron-phonon tensor. For the Holstein model"""
-        g_tensor = -self.g * numpy.eye(self.nsites)
+        g_tensor = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
+        for site in range(self.nsites):
+            g_tensor[site, site, site] = 1.
+        g_tensor *= -self.g
         return g_tensor
 

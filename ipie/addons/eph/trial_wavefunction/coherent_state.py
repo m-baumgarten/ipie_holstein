@@ -87,8 +87,11 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
 
         e_ph = ham.w0 * np.sum(beta0.conj() * beta0)
-        rho = ham.g_tensor * (G[0] + G[1])
-        e_eph = np.sum(np.dot(rho, beta0.conj() + beta0))
+#        rho = ham.g_tensor * (G[0] + G[1])
+#        e_eph = np.sum(np.dot(rho, beta0.conj() + beta0))
+        e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G[0], beta0.conj() + beta0)
+        if self.ndown > 0:
+            e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G[1], beta0.conj() + beta0)
 
         etrial = kinetic + e_ph + e_eph
         return etrial, e_ph

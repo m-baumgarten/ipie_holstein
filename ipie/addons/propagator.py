@@ -1,7 +1,8 @@
-from ipie.addons.eph.propagation.holstein import HolsteinPropagator, HolsteinPropagatorFree
+from ipie.addons.eph.propagation.eph_propagator import EPhPropagator, EPhPropagatorFree
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
-from ipie.addons.eph.propagation.ssh import SSHPropagator
+#from ipie.addons.eph.propagation.ssh import SSHPropagator
 from ipie.addons.eph.hamiltonians.ssh import BondSSHModel
 from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel
 
-PropagatorAddons = {HolsteinModel: HolsteinPropagator, BondSSHModel: SSHPropagator, AcousticSSHModel: SSHPropagator}
+PropagatorAddons = {GenericEPhModel: EPhPropagator, HolsteinModel: EPhPropagator, BondSSHModel: EPhPropagator, AcousticSSHModel: EPhPropagator}

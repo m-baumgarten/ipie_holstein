@@ -16,9 +16,10 @@ import numpy as np
 from typing import List, Union, Tuple
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
-from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
-from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
-from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+#from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+#from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
+#from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
 import jax
 import jax.numpy as npj
 import plum
@@ -101,59 +102,13 @@ class ToyozawaVariational(Variational):
 
             num_energy += (projected_energy * overlap).real
             denom += overlap.real
-
         energy = num_energy / denom
         return energy.real
 
     def get_args(self):
         return ()
 
-    @plum.dispatch
-    def projected_energy(self, ham: HolsteinModel, G: list, shift, beta_i):
-        rho = G[0].diagonal() + G[1].diagonal()
-        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-        phonon_contrib = ham.w0 * npj.sum(shift.conj() * beta_i)
-        el_ph_contrib = -ham.g * npj.dot(rho, shift.conj() + beta_i)
-        projected_energy = kinetic + el_ph_contrib + phonon_contrib
-        return projected_energy
-
-    @plum.dispatch
-    def projected_energy(self, ham: AcousticSSHModel, G: list, shift, beta_i):
-        kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-
-        X = shift.conj() + beta_i
-        displ = npj.array(ham.X_connectivity).dot(X)
-        displ_mat = npj.diag(displ[:-1], 1)
-        displ_mat += displ_mat.T
-        if ham.pbc:
-            displ_mat = displ_mat.at[0, -1].set(displ[-1])
-            displ_mat = displ_mat.at[-1, 0].set(displ[-1])
-
-        tmp0 = ham.g_tensor * G[0] * displ_mat
-        if self.sys.ndown > 0:
-            tmp0 += ham.g_tensor * G[1] * displ_mat
-        el_ph_contrib = jax.numpy.sum(tmp0)
-
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
-        local_energy = kinetic + el_ph_contrib + phonon_contrib
-        return local_energy
-
-    @plum.dispatch
-    def projected_energy(self, ham: BondSSHModel, G: list, shift, beta_i):
-        kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-
-        X = shift.conj() + beta_i
-        tmp0 = ham.g_tensor * G[0] * X
-        if self.sys.ndown > 0:
-            tmp0 += ham.g_tensor * G[1] * X
-        el_ph_contrib = 2 * jax.numpy.sum(tmp0)
-
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
-        local_energy = kinetic + el_ph_contrib + phonon_contrib
-        return local_energy
-
-    @plum.dispatch
-    def projected_energy(self, ham: Union[HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric], G: list, shift, beta_i):
+    def projected_energy(self, ham: GenericEPhModel, G: list, shift, beta_i):
         kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
         if self.sys.ndown > 0:
