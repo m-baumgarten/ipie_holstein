@@ -24,14 +24,15 @@ import plum
 
 from ipie.addons.eph.trial_wavefunction.variational.variational import Variational
 
-def circ_perm_1D(sites: int) -> np.ndarray:
+def circ_perm_1D(sites: Union[int, np.ndarray]) -> np.ndarray:
+    sites = np.arange(sites)
     circs = sites
-    for shift in range(1, sites):
+    for shift in range(1, len(sites)):
         new_circ = np.roll(sites, -shift)
         circs = np.vstack([circs, new_circ])
     return circs
 
-def circ_perm(hamiltonian) -> np.ndarray:
+def circ_perm(hamiltonian, k) -> np.ndarray:
     """Returns a matrix which rows consist of all possible
     cyclic permutations given an initial array lst.
 
@@ -41,12 +42,12 @@ def circ_perm(hamiltonian) -> np.ndarray:
         Initial array which is to be cyclically permuted
     """
     nsites = hamiltonian.nsites
-    perms = np.zeros(hamiltonian.N**2)
-    lattice = np.arange(hamiltonian.N).reshape(nsites)
-    
+    perms = np.zeros((hamiltonian.N, hamiltonian.N), dtype=np.int32)
+    lattice = np.arange(hamiltonian.N, dtype=np.int32).reshape(nsites)
+
+    kcoeffs = np.zeros(hamiltonian.N, dtype=np.complex128)
     if hamiltonian.dim == 1:
-        perms_x = circ_perm_1D(nsites[0]) 
-        return perms_x
+        perms = circ_perm_1D(nsites[0])
 
     elif hamiltonian.dim == 2:
         perms_x = circ_perm_1D(nsites[0])
@@ -54,8 +55,9 @@ def circ_perm(hamiltonian) -> np.ndarray:
         for xi, perm_x in enumerate(perms_x):
             for yi, perm_y in enumerate(perms_y):
                 index = xi * nsites[1] + yi
-                perms[index, :] = lattice[perm_x, perm_y].reshape(hamiltonian.N)
-        return perms
+                kcoeffs[index] = np.exp(1j * (xi * k[0] + yi * k[1]))
+                print(kcoeffs)
+                perms[index, :] = lattice[perm_x, :][:, perm_y].reshape(hamiltonian.N).astype(np.int32)
     
     elif hamiltonian.dim == 3:
         perms_x = circ_perm_1D(nsites[0])
@@ -65,9 +67,9 @@ def circ_perm(hamiltonian) -> np.ndarray:
             for yi, perm_y in enumerate(perms_y):
                 for zi, perm_z in enumerate(perms_z):
                     index = xi * nsites[1] * nsites[2] + yi * nsites[2] + zi
-                    perms[index, :] = lattice[perm_x, perm_y, perm_z].reshape(hamiltonian.N)
+                    perms[index, :] = lattice[perm_x, perm_y, perm_z].reshape(hamiltonian.N).astype(np.int)
     
-    return perms
+    return perms, kcoeffs 
 
 def get_kcoeffs(hamiltonian, K):
     """"""
@@ -90,6 +92,34 @@ def get_kcoeffs(hamiltonian, K):
     Kcoeffs = np.exp(exponent)
     return Kcoeffs
 
+def overlap_degeneracy(hamiltonian, index):
+    if hamiltonian.dim == 1:
+        if index != 0:
+            degeneracy = (hamiltonian.N - index) * 2
+        else:
+            degeneracy = hamiltonian.N
+
+    if hamiltonian.dim == 2:
+        index_x, index_y = divmod(index, hamiltonian.nsites[1])
+        if index_x != 0 or index_y !=0:
+            if index_y == 0 or index_x == 0:
+                degeneracy = (hamiltonian.nsites[0] - index_x) * (hamiltonian.nsites[1] - index_y) * 2
+            else:
+                degeneracy = (hamiltonian.nsites[0] - index_x) * (hamiltonian.nsites[1] - index_y) * 4
+        else:
+            degeneracy = hamiltonian.N
+    
+    if hamiltonian.dim == 3:
+        index_remainder, index_c = divmod(index, hamiltonian.nsites[2])
+        index_x, index_y = divmod(index_remainder, hamiltonian.nsites[1])
+        if index_x != 0 or index_y !=0 or index_z !=0:
+            degeneracy = (hamiltonian.N - index_x) * (hamiltonian.N - index_y) * (hamiltonian.N - index_z) * 2
+        else:
+            degeneracy = hamiltonian.N 
+
+    return degeneracy
+
+
 class ToyozawaVariational(Variational):
     def __init__(
         self,
@@ -105,11 +135,13 @@ class ToyozawaVariational(Variational):
             self.K = np.array([K])
         else:
             self.K = K
-        self.perms = circ_perm(hamiltonian)
+        self.perms, kcoeff = circ_perm(hamiltonian, K)
+        print(self.perms)
         self.nperms = self.perms.shape[0]
         self.Kcoeffs = get_kcoeffs(hamiltonian, K)
+        assert np.all(kcoeff == self.Kcoeffs)
 
-    def objective_function(self, x, zero_th: float = 1e-12) -> float:
+    def objective_function_final(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
         shift_abs = npj.abs(shift)
@@ -118,8 +150,8 @@ class ToyozawaVariational(Variational):
         denom = 0.0
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
-
-            beta_i = shift[npj.array(permi)]
+#            jax.debug.print('perms_ {x}', x=[permi, self.perms, type(permi)])
+            beta_i = shift[permi]
             beta_i_abs = npj.abs(beta_i)
             psia_i = c0a[permi, :]
 
@@ -134,10 +166,7 @@ class ToyozawaVariational(Variational):
             if npj.abs(overlap) < zero_th:
                 continue
 
-            if ip != 0:
-                overlap = overlap * (self.ham.nsites - ip) * 2
-            else:
-                overlap = overlap * self.ham.nsites
+            overlap *= overlap_degeneracy(self.ham, ip)
 
             # Evaluate Greens functions
             Ga_j = gab(c0a, psia_i)
@@ -152,8 +181,67 @@ class ToyozawaVariational(Variational):
 
             num_energy += (projected_energy * overlap).real
             denom += overlap.real
-
         energy = num_energy / denom
+        jax.debug.print('energy:    {x}', x=energy)
+        return energy.real
+    
+    def objective_function(self, x, zero_th: float = 1e-12) -> float:
+        """"""
+        shift, c0a, c0b = self.unpack_x(x)
+        shift_abs = npj.abs(shift)
+
+        num_energy = 0.0
+        denom = 0.0
+
+        for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
+            beta_i = shift[permi]
+            beta_i_abs = npj.abs(beta_i)
+            psia_i = c0a[permi, :]
+
+            for jp, (permj, coeffj) in enumerate(zip(self.perms, self.Kcoeffs)):
+                beta_j = shift[permj]
+                beta_j_abs = npj.abs(beta_j)
+                psia_j = c0a[permj, :]
+
+                overlap = npj.linalg.det(psia_i.conj().T.dot(psia_j)) * npj.prod(
+                    npj.exp(-0.5 * (beta_i_abs**2 + beta_j_abs**2) + beta_i.conj() * beta_j)
+                )
+                if self.sys.ndown > 0:
+                    psib_i = c0b[permi, :]
+                    psib_j = c0b[permj, :]
+                    overlap *= npj.linalg.det(psib_i.conj().T.dot(psib_j))
+                overlap *= coeffi.conj() * coeffj
+
+                if npj.abs(overlap) < zero_th:
+                    continue
+
+#                if ip != 0:
+#                    overlap = overlap * (self.ham.nsites - ip) * 2
+#                else:
+#                    overlap = overlap * self.ham.nsites
+
+            # Evaluate Greens functions
+                Ga_ij = gab(psia_i, psia_j)
+                if self.sys.ndown > 0:
+                    Gb_ij = gab(psib_i, psib_j)
+                else:
+                    Gb_ij = npj.zeros_like(Ga_ij)
+                G_ij = [Ga_ij, Gb_ij]
+
+            # Obtain projected energy of permuted soliton on original soliton
+                projected_energy = self.projected_energy(self.ham, G_ij, beta_i, beta_j)
+    
+#                num_energy += (projected_energy * overlap).real
+#                denom += overlap.real
+                num_energy += projected_energy * overlap
+                denom += overlap
+#                jax.debug.print('perms:     {x}', x=(ip,jp))
+#                jax.debug.print('energy_    {x}', x=projected_energy * overlap)
+                jax.debug.print('overlap:   {x}', x=[ip,jp,overlap])
+        energy = num_energy / denom
+#        npj.save('ovlp.npy', ovlp)
+#        npj.save('energy.npy', energy)
+        jax.debug.print('energy:    {x}', x=energy)       
         return energy.real
 
     def get_args(self):
@@ -164,7 +252,7 @@ class ToyozawaVariational(Variational):
         rho = G[0].diagonal() + G[1].diagonal()
         kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         phonon_contrib = ham.w0 * npj.sum(shift.conj() * beta_i)
-        el_ph_contrib = -ham.g * npj.dot(rho, shift.conj() + beta_i)
+        el_ph_contrib = -ham.g * npj.sum(npj.dot(rho, shift.conj() + beta_i))
         projected_energy = kinetic + el_ph_contrib + phonon_contrib
         return projected_energy
 
