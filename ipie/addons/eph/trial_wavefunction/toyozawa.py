@@ -123,9 +123,9 @@ class ToyozawaTrial(CoherentStateTrial):
             e_ph = ham.w0 * np.sum(beta0.conj() * beta_i)
             #rho = ham.g_tensor * (G_i[0] + G_i[1])
             #e_eph = np.sum(np.dot(rho, beta0.conj() + beta_i))
-            e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G[0], beta0.conj() + beta_i)
+            e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G_i[0], beta0.conj() + beta_i)
             if ip != 0:
-                e_eph += np.einsum('ijk,ij,k->', ham.g_tensor, G[1], beta0.conj() + beta_i)
+                e_eph += np.einsum('ijk,ij,k->', ham.g_tensor, G_i[1], beta0.conj() + beta_i)
 
             num_energy += np.real((kinetic + e_ph + e_eph) * ov)
             num_ph_energy += np.real(e_ph * ov)

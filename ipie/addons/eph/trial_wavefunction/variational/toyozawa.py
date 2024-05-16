@@ -17,6 +17,7 @@ from typing import List, Union, Tuple
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+from ipie.addons.eph.hamiltonians.exciton_phonon_cavity import ExcitonPhononCavityElectron, ExcitonPhononCavityHole
 #from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 #from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
 #from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
@@ -108,6 +109,7 @@ class ToyozawaVariational(Variational):
     def get_args(self):
         return ()
 
+    @plum.dispatch
     def projected_energy(self, ham: GenericEPhModel, G: list, shift, beta_i):
         kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
@@ -115,4 +117,15 @@ class ToyozawaVariational(Variational):
             el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
         phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
+        return local_energy
+
+    @plum.dispatch
+    def projected_energy(self, ham: Union[ExcitonPhononCavityElectron, ExcitonPhononCavityHole], G: list, shift, beta_i):
+        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
+        ferm_ferm_contrib = np.sum(ham.quad[0] * G[0] + ham.quad[1] * G[1])
+        el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
+        if self.sys.ndown > 0:
+            el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
+        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
+        local_energy = kinetic + el_ph_contrib + phonon_contrib + ferm_ferm_contrib
         return local_energy

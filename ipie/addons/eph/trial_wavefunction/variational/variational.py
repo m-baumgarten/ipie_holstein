@@ -18,6 +18,7 @@ from typing import Tuple
 from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 import jax
 import jax.numpy as npj
 
@@ -177,10 +178,7 @@ class Variational(metaclass=ABCMeta):
         return shift, c0a, c0b
 
     @plum.dispatch
-    def initial_guess(self, ham: HolsteinModel):
-        r"""Initial guess for the global optimization for the Holstein Model. 
-        We assume the shift to be real. Initial electronic degrees of freedom
-        are obtained from diagonalizing the one-body electronic operator T."""
+    def initial_guess(self, ham: GenericEPhModel) -> None:
         _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
         psia = elec_eigvecs_a[:, :self.sys.nup]
         if self.sys.ndown > 0:
@@ -197,8 +195,33 @@ class Variational(metaclass=ABCMeta):
             Gb = np.zeros_like(Ga)
         G = [Ga, Gb]
 
-        rho = G[0].diagonal() + G[1].diagonal()
-        shift = self.ham.g * rho / self.ham.w0
-
+        shift = np.einsum('ijk,ij->k', ham.g_tensor, G[0] + G[1]) / self.ham.w0        
         self.psi = psi.T.ravel()
         self.shift = shift
+
+#    @plum.dispatch
+#    def initial_guess(self, ham: HolsteinModel):
+#        r"""Initial guess for the global optimization for the Holstein Model. 
+#        We assume the shift to be real. Initial electronic degrees of freedom
+#        are obtained from diagonalizing the one-body electronic operator T."""
+#        _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
+#        psia = elec_eigvecs_a[:, :self.sys.nup]
+#        if self.sys.ndown > 0:
+#            _, elec_eigvecs_a = np.linalg.eigh(ham.T[1])
+#            psib = elec_eigvecs_a[:, :self.sys.ndown]
+#            psi = np.column_stack([psia, psib])
+#        else:
+#            psi = psia
+#
+#        Ga = gab(psia, psia)
+#        if self.sys.ndown > 0:
+#            Gb = gab(psib, psib)
+#        else:
+#            Gb = np.zeros_like(Ga)
+#        G = [Ga, Gb]
+#
+#        rho = G[0].diagonal() + G[1].diagonal()
+#        shift = self.ham.g * rho / self.ham.w0
+#
+#        self.psi = psi.T.ravel()
+#        self.shift = shift
