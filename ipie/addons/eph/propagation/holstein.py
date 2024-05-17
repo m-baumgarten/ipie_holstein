@@ -132,7 +132,8 @@ class HolsteinPropagatorFree:
             Walkers class
         """
         start_time = time.time()
-
+        print('free ph')
+        exit()
         pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot)
@@ -230,7 +231,7 @@ class HolsteinPropagatorFree:
 #        print('phia:    ', walkers.phia)
         # Update Walkers
         # a) DMC for phonon degrees of freedom
-#        self.propagate_phonons(walkers, hamiltonian, trial)
+        self.propagate_phonons(walkers, hamiltonian, trial)
 
         # b) One-body propagation for electrons
 #        ovlp = trial.calc_overlap(walkers)
@@ -239,7 +240,7 @@ class HolsteinPropagatorFree:
 #        print('phia:    ', walkers.phia)
 #        exit()
  #       # c) DMC for phonon degrees of freedom
-#        self.propagate_phonons(walkers, hamiltonian, trial)
+        self.propagate_phonons(walkers, hamiltonian, trial)
 
         # Update weights (and later do phaseless for multi-electron)
         start_time = time.time()
@@ -323,7 +324,8 @@ class HolsteinPropagator(HolsteinPropagatorFree):
         walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
 
         walkers.weight *= numpy.exp(self.dt_ph * trial.energy)
-
+        print('free ph')
+        exit()
         synchronize()
         self.timer.tgemm += time.time() - start_time
 
@@ -367,7 +369,6 @@ class FreePropagationHolstein(HolsteinPropagator):
         pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real)
-        
         # unecessary, as walkers.phonon_disp is real anyways, but just in case
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag)
         if not numpy.all(walkers.phase == 1.):

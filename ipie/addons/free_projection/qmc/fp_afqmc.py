@@ -364,7 +364,7 @@ class FPAFQMC(AFQMC):
 #                time_step=block_number,
 #            )
 #            block_number += 1
-           
+#            exit()           
             initial_walkers.build(self.trial)
             self.walkers = initial_walkers
             for step in range(1, total_steps + 1):
