@@ -38,6 +38,7 @@ from ipie.walkers.walkers_dispatch import get_initial_walker
 from ipie.addons.free_projection.walkers.eph_walkers import EPhWalkersFP
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
+from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 
 from ipie.walkers.pop_controller import PopController
 
@@ -336,7 +337,7 @@ class FPAFQMC(AFQMC):
             block_number = 0
             _, initial_walker = get_initial_walker(self.trial)
             # TODO this is a factory method not a class
-            if isinstance(self.trial, ToyozawaTrial):
+            if isinstance(self.trial, ToyozawaTrial) or isinstance(self.trial, CoherentStateTrial):
                 initial_walkers = EPhWalkersFP(
                     initial_walker,
                     self.system.nup,
@@ -353,7 +354,17 @@ class FPAFQMC(AFQMC):
                     self.params.num_walkers,
                     self.mpi_handler,
                 )
-            
+#            self.estimators[block_number].compute_estimators(
+#                comm, self.system, self.hamiltonian, self.trial, self.walkers
+#            )
+#            self.estimators[block_number].print_block(
+#                comm,
+#                iter,
+#                self.accumulators,
+#                time_step=block_number,
+#            )
+#            block_number += 1
+           
             initial_walkers.build(self.trial)
             self.walkers = initial_walkers
             for step in range(1, total_steps + 1):

@@ -226,17 +226,20 @@ class HolsteinPropagatorFree:
         walkers.ovlp = ovlp
         synchronize()
         self.timer.tgf += time.time() - start_time
-        
+
+#        print('phia:    ', walkers.phia)
         # Update Walkers
         # a) DMC for phonon degrees of freedom
-        self.propagate_phonons(walkers, hamiltonian, trial)
+#        self.propagate_phonons(walkers, hamiltonian, trial)
 
         # b) One-body propagation for electrons
 #        ovlp = trial.calc_overlap(walkers)
         self.propagate_electron(walkers, hamiltonian, trial)
-
-        # c) DMC for phonon degrees of freedom
-        self.propagate_phonons(walkers, hamiltonian, trial)
+        
+#        print('phia:    ', walkers.phia)
+#        exit()
+ #       # c) DMC for phonon degrees of freedom
+#        self.propagate_phonons(walkers, hamiltonian, trial)
 
         # Update weights (and later do phaseless for multi-electron)
         start_time = time.time()

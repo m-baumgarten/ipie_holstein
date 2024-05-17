@@ -53,12 +53,31 @@ def local_energy_holstein(
 
     energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
 
+    walkers.ovlp = trial.calc_overlap(walkers)
+    
+#    assert np.all(trial.psia == np.random.random(trial.psia.shape) * 0.5 - np.random.random(trial.psia.shape))
+#    trial.psia = np.random.random(trial.psia.shape) * 0.5 - np.random.random(trial.psia.shape)
+#    np.save('psia.npy', trial.psia)
+#    walkers.phia = np.array([trial.psia.copy() for n in range(walkers.nwalkers)])
+#    print(walkers.phia.shape, trial.psia.shape)
+#    exit()
+#    walkers.phia = np.random.random(walkers.phia.shape) * 0.5 - np.random.random(walkers.phia.shape)
+#    walkers.ovlp = trial.calc_overlap(walkers)
+#    print('beta in loc en:  ', trial.beta_shift[0])
+#    print('psia in loc en:  ', trial.psia[0,0])
+#    print('walkers disp in loc en:  ', walkers.phonon_disp[0,0])
+#    print('walkers phia in loc en:  ', walkers.phia[0,0,0])
+#    exit()
     gf = trial.calc_greens_function(walkers)
     walkers.Ga, walkers.Gb = gf[0], gf[1]
 
     energy[:, 1] = np.sum(hamiltonian.T[0] * gf[0], axis=(1, 2))
+#    print('energy:  ', energy[:, 1])
     if system.ndown > 0:
         energy[:, 1] += np.sum(hamiltonian.T[1] * gf[1], axis=(1, 2))
+#    print(hamiltonian.T[0], gf[0][0], gf[0].shape)
+#    print('braket:  ', trial.psia, walkers.phia)
+    #exit()
 
     energy[:, 2] = np.sum(np.diagonal(gf[0], axis1=1, axis2=2) * walkers.phonon_disp, axis=1)
     if system.ndown > 0:
@@ -70,5 +89,8 @@ def local_energy_holstein(
     energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
 
     energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
-
+    
+#    print(energy[0, 1], energy[0, 2], energy[0, 3])
+#    print(np.linalg.eigh(hamiltonian.T[0]))
+#    exit()
     return energy
