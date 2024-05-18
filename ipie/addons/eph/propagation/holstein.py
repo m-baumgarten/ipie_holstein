@@ -250,12 +250,11 @@ class HolsteinPropagatorFree:
         self.timer.tovlp += time.time() - start_time
 
         start_time = time.time()
-#        self.update_weight(walkers, ovlp, ovlp_new)
+        self.update_weight(walkers, ovlp, ovlp_new)
         synchronize()
         self.timer.tupdate += time.time() - start_time
 
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
-
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
 
@@ -385,7 +384,6 @@ class FreePropagationHolstein(HolsteinPropagator):
         if not numpy.all(walkers.phase == 1.):
             print('ph2: ', walkers.phase)
             exit()
-
 #        # Does not matter for estimators but helps with population control
         walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2)
         synchronize()
