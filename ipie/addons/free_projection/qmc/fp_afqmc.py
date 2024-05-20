@@ -21,7 +21,7 @@ import json
 import time
 from typing import Dict, Optional, Tuple
 
-from ipie.addons.free_projection.estimators.handler import EstimatorHandlerFP
+from ipie.addons.free_projection.estimators.handler import EstimatorHandlerFP, EstimatorHandlerFPImportance
 from ipie.addons.free_projection.propagation.free_propagation import FreePropagation
 from ipie.addons.free_projection.qmc.options import QMCParamsFP
 from ipie.addons.free_projection.walkers.uhf_walkers import UHFWalkersFP
@@ -41,6 +41,8 @@ from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 
 from ipie.walkers.pop_controller import PopController
+import numpy
+from ipie.addons.eph.propagation.holstein import FreePropagationHolsteinImportance
 
 class FPAFQMC(AFQMC):
     """Free projection AFQMC driver."""
@@ -131,7 +133,7 @@ class FPAFQMC(AFQMC):
         else:
             comm = mpi_handler.comm
         if isinstance(hamiltonian, HolsteinModel):
-            fp_prop = FreePropagationHolstein(timestep, verbose=verbose, exp_nmax=10, ene_0=ene_0)
+            fp_prop = FreePropagationHolsteinImportance(timestep, verbose=verbose, exp_nmax=10, ene_0=ene_0)
             fp_prop.build(hamiltonian, driver.trial, walkers, mpi_handler)
         else:
             fp_prop = FreePropagation(timestep, verbose=verbose, exp_nmax=10, ene_0=ene_0)
@@ -264,18 +266,32 @@ class FPAFQMC(AFQMC):
         comm = self.mpi_handler.comm
         self.estimators = []
         for i in range(self.params.num_blocks):
-            self.estimators.append(
-                EstimatorHandlerFP(
-                    self.mpi_handler.comm,
-                    self.system,
-                    self.hamiltonian,
-                    self.trial,
-                    walker_state=self.accumulators,
-                    verbose=(comm.rank == 0 and self.verbose),
-                    filename=f"{filename}.{i}",
-                    observables=("energy",),
+            if not isinstance(self.propagator, FreePropagationHolsteinImportance):
+                self.estimators.append(
+                    EstimatorHandlerFP(
+                        self.mpi_handler.comm,
+                        self.system,
+                        self.hamiltonian,
+                        self.trial,
+                        walker_state=self.accumulators,
+                        verbose=(comm.rank == 0 and self.verbose),
+                        filename=f"{filename}.{i}",
+                        observables=("energy",),
+                    )
                 )
-            )
+            else:
+                self.estimators.append(
+                    EstimatorHandlerFPImportance(
+                        self.mpi_handler.comm,
+                        self.system,
+                        self.hamiltonian,
+                        self.trial,
+                        walker_state=self.accumulators,
+                        verbose=(comm.rank == 0 and self.verbose),
+                        filename=f"{filename}.{i}",
+                        observables=("energy",),
+                    )
+                )
         if additional_estimators is not None:
             raise NotImplementedError(
                 "Additional estimators not implemented yet for free projection."
@@ -295,6 +311,7 @@ class FPAFQMC(AFQMC):
         estimator_filename="estimate.h5",
         verbose=True,
         additional_estimators: Optional[Dict[str, EstimatorBase]] = None,
+        free_projection=True
     ):
         """Perform FP AFQMC simulation on state object by Gaussian sampling of short time projection.
 
@@ -315,12 +332,6 @@ class FPAFQMC(AFQMC):
         eshift = 0.0
         self.walkers.orthogonalise()
         
-        self.pcontrol = PopController(
-            self.params.num_walkers,
-            self.params.num_steps_per_block,
-            self.mpi_handler,
-            verbose=self.verbose,
-        ) 
 
         self.get_env_info()
         self.copy_to_gpu()
@@ -354,6 +365,12 @@ class FPAFQMC(AFQMC):
                     self.params.num_walkers,
                     self.mpi_handler,
                 )
+            self.pcontrol = PopController(
+                self.params.num_walkers,
+                self.params.num_steps_per_block,
+                self.mpi_handler,
+                verbose=self.verbose,
+            ) 
 #            self.estimators[block_number].compute_estimators(
 #                comm, self.system, self.hamiltonian, self.trial, self.walkers
 #            )
@@ -372,7 +389,7 @@ class FPAFQMC(AFQMC):
                 start_step = time.time()
                 if step % self.params.num_stblz == 0:
                     start = time.time()
-                    self.walkers.orthogonalise()
+                    self.walkers.orthogonalise(free_projection)
                     synchronize()
                     self.tortho += time.time() - start
                 start = time.time()
@@ -381,8 +398,16 @@ class FPAFQMC(AFQMC):
                     self.walkers, self.hamiltonian, self.trial, eshift
                 )
 
+                if step > 1:
+                    wbound = self.pcontrol.total_weight * 0.10
+                    numpy.clip(
+                        self.walkers.weight, a_min=-wbound, a_max=wbound, out=self.walkers.weight
+                    )  # in-place clipping
+
                 if step % self.params.pop_control_freq == 0:     
+#                    print(self.walkers.weight[0])
                     self.pcontrol.pop_control(self.walkers, comm)
+#                    print(self.walkers.weight[0])
 
                 self.tprop_ovlp = self.propagator.timer.tovlp
                 self.tprop_update = self.propagator.timer.tupdate

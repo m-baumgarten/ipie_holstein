@@ -25,7 +25,7 @@ class EPhWalkersFP(EPhWalkers):
 #    def __init__(self, initial_walker: numpy.ndarray, nup: int, ndown: int, nbasis: int, nwalkers: int, verbose: bool = False):
 #        super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
 
-    def orthogonalise(self, free_projection=False):
+    def orthogonalise(self, free_projection=True):
         """Orthogonalise all walkers.
 
         Parameters
@@ -34,9 +34,10 @@ class EPhWalkersFP(EPhWalkers):
             This flag is not used here.
         """
         detR = self.reortho()
-        magn, dtheta = xp.abs(self.detR), xp.angle(self.detR)
-        self.weight *= magn
-        self.phase *= xp.exp(1j * dtheta)
+        if free_projection:
+            magn, dtheta = xp.abs(self.detR), xp.angle(self.detR)
+            self.weight *= magn
+            self.phase *= xp.exp(1j * dtheta)
         return detR
     
     def reortho(self):

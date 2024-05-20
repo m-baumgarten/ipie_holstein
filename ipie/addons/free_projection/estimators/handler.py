@@ -25,7 +25,7 @@ from typing import Tuple, Union
 import h5py
 import numpy
 
-from ipie.addons.free_projection.estimators.energy import EnergyEstimatorFP
+from ipie.addons.free_projection.estimators.energy import EnergyEstimatorFP, EnergyEstimatorFPImportance
 from ipie.config import MPI
 from ipie.estimators.handler import EstimatorHandler
 from ipie.estimators.utils import H5EstimatorHelper
@@ -133,3 +133,39 @@ class EstimatorHandlerFP(EstimatorHandler):
                 blank = ""
                 print(f"{blank:>17s} {time_step:>10d}" + output_string)
         self.zero()
+
+class EstimatorHandlerFPImportance(EstimatorHandlerFP):
+    def __init__(
+        self,
+        comm,
+        system,
+        hamiltonian,
+        trial,
+        walker_state=None,
+        verbose: bool = False,
+        filename: Union[str, None] = None,
+        block_size: int = 1,
+        basename: str = "estimates",
+        overwrite=True,
+        observables: Tuple[str] = ("energy",),  # TODO: Use factory method!
+        index: int = 0,
+    ):
+        super().__init__(
+            comm,
+            system,
+            hamiltonian,
+            trial,
+            walker_state,
+            verbose,
+            filename,
+            block_size,
+            basename,
+            overwrite,
+            observables,
+            index,
+        )
+        self["energy"] = EnergyEstimatorFPImportance(
+            system=system,
+            ham=hamiltonian,
+            trial=trial,
+        )

@@ -336,11 +336,7 @@ class FreePropagationHolstein(HolsteinPropagator):
 
     def update_weight(self, walkers, ovlp, ovlp_new):
         walkers.weight *= numpy.exp(self.dt_ph * self.eshift)
-        assert numpy.all(walkers.weight > 0)
-        if not numpy.all(walkers.phase == 1.):
-            print(walkers.phase)
-    
-    
+
     def propagate_phonons(
         self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase
     ) -> None:
@@ -368,11 +364,7 @@ class FreePropagationHolstein(HolsteinPropagator):
         pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real)
-        # unecessary, as walkers.phonon_disp is real anyways, but just in case
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag)
-        if not numpy.all(walkers.phase == 1.):
-            print('ph1: ', walkers.phase)
-            exit()
 
         N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
         walkers.phonon_disp = walkers.phonon_disp + N
@@ -381,10 +373,117 @@ class FreePropagationHolstein(HolsteinPropagator):
         pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real)
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag)
-        if not numpy.all(walkers.phase == 1.):
-            print('ph2: ', walkers.phase)
-            exit()
-#        # Does not matter for estimators but helps with population control
+        
+        # Does not matter for estimators but helps with population control
         walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2)
         synchronize()
         self.timer.tgemm += time.time() - start_time
+
+
+class FreePropagationHolsteinImportance(FreePropagationHolstein):
+
+    def propagate_phonons(
+        self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase
+    ) -> None:
+        start_time = time.time()
+
+        ovlp_old = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp_old
+
+        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
+        pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
+        walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
+        walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag / 2)
+
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
+        walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
+
+        ovlp_new = trial.calc_overlap(walkers)
+#        self.update_weight(walkers, walkers.ovlp, ovlp_new)
+        walkers.ovlp = ovlp_new
+
+        pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
+        pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
+        pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
+        walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
+        walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag / 2)
+
+#        ratio = ovlp_old / ovlp_new
+#        walkers.weight *= numpy.abs(ratio)
+#        walkers.phase *= numpy.exp(1j * numpy.angle(ratio))
+
+        synchronize()
+        self.timer.tgemm += time.time() - start_time
+
+    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+        ratio = ovlp_new / ovlp
+        phase = numpy.angle(ratio)
+
+        walkers.weight *= numpy.abs(ratio)
+        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
+    
+    def propagate_walkers(
+        self,
+        walkers: EPhWalkers,
+        hamiltonian: HolsteinModel,
+        trial: EPhTrialWavefunctionBase,
+        eshift: float = None,
+    ) -> None:
+        r"""Propagates walkers by trotterized propagator.
+
+        Parameters
+        ----------
+        walkers :
+            EPhWalkers object
+        hamiltonian :
+            HolsteinModel object
+        trial :
+            EPhTrialWavefunctionBase object
+        eshift :
+            Only purpose is compatibility with AFQMC object, irrelevant for
+            propagation
+        """
+        synchronize()
+        start_time = time.time()
+        synchronize()
+        self.timer.tgf += time.time() - start_time
+
+#        ovlp = trial.calc_overlap(walkers)
+#        self.update_weight(walkers, walkers.ovlp, ovlp)
+#        walkers.ovlp = ovlp
+
+#        print('phia:    ', walkers.phia)
+        # Update Walkers
+        # a) DMC for phonon degrees of freedom
+#        print('walkers.weigth I:  ', numpy.min(walkers.weight))
+        self.propagate_phonons(walkers, hamiltonian, trial)
+#        print('walkers.weigth II:  ', numpy.min(walkers.weight))
+
+        # b) One-body propagation for electrons
+#        ovlp = trial.calc_overlap(walkers)
+        ovlp = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp
+        self.propagate_electron(walkers, hamiltonian, trial)
+        ovlp_new = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp_new
+        self.update_weight(walkers, ovlp, ovlp_new)
+#        print('walkers.weigth III:  ', numpy.min(walkers.weight))
+#        print('phia:    ', walkers.phia)
+#        exit()
+ #       # c) DMC for phonon degrees of freedom
+        self.propagate_phonons(walkers, hamiltonian, trial)
+#        print('walkers.weigth IV:  ', numpy.min(walkers.weight))
+
+        # Update weights (and later do phaseless for multi-electron)
+        start_time = time.time()
+        synchronize()
+        self.timer.tovlp += time.time() - start_time
+
+        start_time = time.time()
+#        self.update_weight(walkers, ovlp, ovlp_new)
+        synchronize()
+        self.timer.tupdate += time.time() - start_time
