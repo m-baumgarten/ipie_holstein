@@ -20,6 +20,7 @@
 import json
 import time
 from typing import Dict, Optional, Tuple
+import numpy
 
 from ipie.addons.free_projection.estimators.handler import EstimatorHandlerFP
 from ipie.addons.free_projection.propagation.free_propagation import FreePropagation
@@ -35,6 +36,16 @@ from ipie.utils.mpi import MPIHandler
 from ipie.walkers.base_walkers import WalkerAccumulator
 from ipie.walkers.walkers_dispatch import get_initial_walker
 
+def get_initial_walker_fp(trial) -> numpy.ndarray:
+    if isinstance(trial, ToyozawaTrial):
+        initial_walker = ...
+        num_dets = ...
+    elif isinstance(trial, CoherentStateTrial):
+        intial_walker = ...
+        num_dets = ...
+    else:
+        num_dets, initial_walker = get_initial_walker(trial=trial)
+    return num_dets, initial_walker
 
 class FPAFQMC(AFQMC):
     """Free projection AFQMC driver."""
@@ -127,7 +138,7 @@ class FPAFQMC(AFQMC):
         fp_prop = FreePropagation(timestep, verbose=verbose, exp_nmax=10, ene_0=ene_0)
         fp_prop.build(hamiltonian, driver.trial, walkers, mpi_handler)
         if walkers is None:
-            _, initial_walker = get_initial_walker(driver.trial)
+            _, initial_walker = get_initial_walker_fp(driver.trial)
             # TODO this is a factory method not a class
             walkers = UHFWalkersFP(
                 initial_walker,
@@ -315,18 +326,29 @@ class FPAFQMC(AFQMC):
 
         for iter in range(self.params.num_iterations_fp):
             block_number = 0
-            _, initial_walker = get_initial_walker(self.trial)
+            _, initial_walker = get_initial_walker_fp(self.trial)
             # TODO this is a factory method not a class
-            initial_walkers = UHFWalkersFP(
-                initial_walker,
-                self.system.nup,
-                self.system.ndown,
-                self.hamiltonian.nbasis,
-                self.params.num_walkers,
-                self.mpi_handler,
-            )
+            if isinstance(self.trial, EPhTrial):
+                initial_walkers = UHFWalkersFP(
+                   initial_walker,
+                    self.system.nup,
+                    self.system.ndown,
+                    self.hamiltonian.nbasis,
+                    self.params.num_walkers,
+                    self.mpi_handler,
+                )
+            else:
+                initial_walkers = UHFWalkersFP(
+                    initial_walker,
+                    self.system.nup,
+                    self.system.ndown,
+                    self.hamiltonian.nbasis,
+                    self.params.num_walkers,
+                    self.mpi_handler,
+                )
             initial_walkers.build(self.trial)
             self.walkers = initial_walkers
+
             for step in range(1, total_steps + 1):
                 synchronize()
                 start_step = time.time()

@@ -22,6 +22,8 @@ from ipie.walkers.base_walkers import BaseWalkers
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 
 class EPhWalkersFP(EPhWalkers):
+#    def __init__(self, initial_walker: numpy.ndarray, nup: int, ndown: int, nbasis: int, nwalkers: int, verbose: bool = False):
+#        super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
 
     def orthogonalise(self, free_projection=True):
         """Orthogonalise all walkers.
