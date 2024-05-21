@@ -175,17 +175,14 @@ class EPhPropagatorFree:
         self.timer.tgf += time.time() - start_time
 
         EPh = self.construct_EPh(walkers, hamiltonian)
-#        expEph = numpy.exp(self.const * EPh)
         expEph = scipy.linalg.expm(self.const * EPh) 
 
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
-#        walkers.phia = numpy.einsum("ni,nie->nie", expEph, walkers.phia)
         walkers.phia = numpy.einsum("nij,nje->nie", expEph, walkers.phia)
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
 
         if walkers.ndown > 0:
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
-#            walkers.phib = numpy.einsum("ni,nie->nie", expEph, walkers.phib)
             walkers.phib = numpy.einsum("nij,nje->nie", expEph, walkers.phib)
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
 
@@ -254,10 +251,6 @@ class EPhPropagatorFree:
             0.0,
         )
         
-#        walkers.phia = numpy.einsum('nie,n->nie', walkers.phia, numpy.exp(-1j * phase))
-#        if walkers.ndown > 0:
-#            walkers.phib = numpy.einsum('nie,n->nie', walkers.phib, numpy.exp(-1j * phase))
-
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return numpy.einsum('ijk,nk->nij', hamiltonian.g_tensor, walkers.phonon_disp)
 
