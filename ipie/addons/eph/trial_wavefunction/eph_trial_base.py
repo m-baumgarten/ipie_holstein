@@ -45,6 +45,7 @@ class EPhTrialWavefunctionBase(metaclass=ABCMeta):
         self.ortho_expansion = False
         self.optimized = True
 
+        self.wavefunction = wavefunction
         self.psia = wavefunction[: self.nup]
         self.psib = wavefunction[self.nup : self.nup + self.ndown]
         self.beta_shift = wavefunction[self.nup + self.ndown :]
