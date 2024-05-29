@@ -79,8 +79,10 @@ class EPhPropagatorFP(EPhPropagatorFree):
         synchronize()
         self.timer.tgemm += time.time() - start_time
 
-class EPhPropagatorFPImportance(EPhPropagator):
-    
+class EPhPropagatorFPImportance(EPhPropagatorFP):
+    def __init__(self, timestep: float, verbose: bool = False, exp_nmax: int = 10, ene_0: float = 0.) -> None:
+        super().__init__(timestep, verbose, exp_nmax, ene_0)
+   
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)

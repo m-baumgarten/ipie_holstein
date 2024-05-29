@@ -19,7 +19,7 @@ import plum
 from ipie.estimators.energy import EnergyEstimator, local_energy
 from ipie.utils.backend import arraylib as xp
 from ipie.systems.generic import Generic
-from ipie.hamiltonians.eph_generic import GenericEPhModel
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
 from ipie.addons.eph.estimators import local_energy_generic
@@ -63,7 +63,6 @@ class EnergyEstimatorFPImportance(EnergyEstimatorFP):
     def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
         trial.calc_greens_function(walkers)
         walkers.ovlp = trial.calc_overlap(walkers)
-        
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
         self._data["ENumer"] = xp.sum(walkers.weight * walkers.phase * energy[:, 0]) # * walkers.ovlp

@@ -26,6 +26,7 @@ import h5py
 import numpy
 
 from ipie.addons.free_projection.estimators.energy import EnergyEstimatorFP
+from ipie.addons.free_projection.estimators.energy_eph import EnergyEstimatorFPImportance
 from ipie.config import MPI
 from ipie.estimators.handler import EstimatorHandler
 from ipie.estimators.utils import H5EstimatorHelper
@@ -46,6 +47,7 @@ class EstimatorHandlerFP(EstimatorHandler):
         overwrite=True,
         observables: Tuple[str] = ("energy",),  # TODO: Use factory method!
         index: int = 0,
+        importance_sampling: bool = False
     ):
         super().__init__(
             comm,
@@ -61,11 +63,20 @@ class EstimatorHandlerFP(EstimatorHandler):
             observables,
             index,
         )
-        self["energy"] = EnergyEstimatorFP(
-            system=system,
-            ham=hamiltonian,
-            trial=trial,
-        )
+        self.importance_sampling = importance_sampling
+        if self.importance_sampling:
+            self["energy"] = EnergyEstimatorFPImportance(
+                system=system,
+                ham=hamiltonian,
+                trial=trial,
+            )
+        else:
+            self["energy"] = EnergyEstimatorFP(
+                system=system,
+                ham=hamiltonian,
+                trial=trial,
+            )
+
 
     def initialize(self, comm, print_header=True):
         self.local_estimates = numpy.zeros(

@@ -51,6 +51,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         self.w0 = w0
         self.m = 1 / w0
         self.nsites = self.nbasis
+        self.wavefunction = wavefunction
 
         # This beta_shift now corresponds to <X>, which is less tedious to work with
         self.beta_shift = np.squeeze(wavefunction[:, 0]) * np.sqrt(2 / (self.m * self.w0))

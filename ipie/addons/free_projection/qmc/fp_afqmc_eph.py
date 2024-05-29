@@ -37,15 +37,19 @@ from ipie.utils.mpi import MPIHandler
 from ipie.walkers.base_walkers import WalkerAccumulator
 from ipie.walkers.walkers_dispatch import get_initial_walker
 
-from ipie.addons.eph.trial.eph_trial_generic import EPhTrialWavefunctionBase
+from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
+from ipie.walkers.pop_controller import PopController
 
 def get_initial_walker_fp(trial) -> numpy.ndarray:
-    if isinstance(trial, ToyozawaTrial):
-        initial_walker = ...
-        num_dets = ...
-    elif isinstance(trial, CoherentStateTrial):
-        intial_walker = ...
-        num_dets = ...
+#    if isinstance(trial, ToyozawaTrial):
+#        initial_walker = trial.wavefunction.copy()
+#        num_dets = 0.
+#    elif isinstance(trial, CoherentStateTrial):
+#        initial_walker = trial.wavefunction.copy()
+#        num_dets = 0.
+    if isinstance(trial, EPhTrialWavefunctionBase):
+        initial_walker = trial.wavefunction.copy()
+        num_dets = 0.
     else:
         num_dets, initial_walker = get_initial_walker(trial=trial)
     return num_dets, initial_walker
@@ -257,7 +261,7 @@ class FPAFQMC(AFQMC):
         )
 
     def setup_estimators(
-        self, filename, additional_estimators: Optional[Dict[str, EstimatorBase]] = None
+            self, filename, additional_estimators: Optional[Dict[str, EstimatorBase]] = None, importance_sampling: bool = False
     ):
         self.accumulators = WalkerAccumulator(
             ["Weight", "WeightFactor", "HybridEnergy"], self.params.num_steps_per_block
@@ -275,6 +279,7 @@ class FPAFQMC(AFQMC):
                     verbose=(comm.rank == 0 and self.verbose),
                     filename=f"{filename}.{i}",
                     observables=("energy",),
+                    importance_sampling=importance_sampling
                 )
             )
         if additional_estimators is not None:
@@ -315,12 +320,12 @@ class FPAFQMC(AFQMC):
             self.walkers = psi
         self.setup_timers()
         eshift = 0.0
-        self.walkers.orthogonalise(free_projection=importance_sampling)
+        self.walkers.orthogonalise(free_projection=(not importance_sampling))
 
         self.get_env_info()
         self.copy_to_gpu()
         self.distribute_hamiltonian()
-        self.setup_estimators(estimator_filename, additional_estimators=additional_estimators)
+        self.setup_estimators(estimator_filename, additional_estimators=additional_estimators, importance_sampling=importance_sampling)
 
         total_steps = self.params.num_steps_per_block * self.params.num_blocks
 
@@ -333,13 +338,12 @@ class FPAFQMC(AFQMC):
             _, initial_walker = get_initial_walker_fp(self.trial)
             # TODO this is a factory method not a class
             if isinstance(self.trial, EPhTrialWavefunctionBase):
-                initial_walkers = UHFWalkersFP(
+                initial_walkers = EPhWalkersFP(
                    initial_walker,
                     self.system.nup,
                     self.system.ndown,
-                    self.hamiltonian.nbasis,
+                    self.hamiltonian.nsites,
                     self.params.num_walkers,
-                    self.mpi_handler,
                 )
             else:
                 initial_walkers = UHFWalkersFP(
@@ -353,12 +357,19 @@ class FPAFQMC(AFQMC):
             initial_walkers.build(self.trial)
             self.walkers = initial_walkers
 
+            self.pcontrol = PopController(
+                self.params.num_walkers,
+                self.params.num_steps_per_block,
+                self.mpi_handler,
+                verbose=self.verbose,
+            ) 
+
             for step in range(1, total_steps + 1):
                 synchronize()
                 start_step = time.time()
                 if step % self.params.num_stblz == 0:
                     start = time.time()
-                    self.walkers.orthogonalise()
+                    self.walkers.orthogonalise(free_projection=(not importance_sampling))
                     synchronize()
                     self.tortho += time.time() - start
                 start = time.time()
@@ -366,6 +377,15 @@ class FPAFQMC(AFQMC):
                 self.propagator.propagate_walkers(
                     self.walkers, self.hamiltonian, self.trial, eshift
                 )
+
+                if step > 1:
+                    wbound = self.pcontrol.total_weight * 0.10
+                    numpy.clip(
+                        self.walkers.weight, a_min=-wbound, a_max=wbound, out=self.walkers.weight
+                    )  # in-place clipping
+
+                if step % self.params.pop_control_freq == 0:     
+                    self.pcontrol.pop_control(self.walkers, comm)
 
                 self.tprop_ovlp = self.propagator.timer.tovlp
                 self.tprop_update = self.propagator.timer.tupdate

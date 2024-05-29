@@ -60,7 +60,7 @@ class ExcitonPhononCavityElectron(HolsteinModel):
             quad[0, -2] = quad[-2, 0] = 1.0
             quad[1, -1] = quad[-1, 1] = 1.0
 
-        quad *= -((self.g * self.je) ** 2) / self.wtilde
+        quad *= ((self.g * self.je) ** 2) / (4 * self.wtilde)
 
         quad = [quad.copy(), quad.copy()]
         return quad
@@ -80,7 +80,7 @@ class ExcitonPhononCavityElectron(HolsteinModel):
             g_tensor[site, (site+2) % self.nsites, (site+1) % self.nsites] = 0.5 * self.c
             g_tensor[(site+2) % self.nsites, site, (site+1) % self.nsites] = 0.5 * self.c
         
-        g_tensor *= -self.ge * self.Xconst
+        g_tensor *= self.ge * self.Xconst
         return g_tensor
 
 class ExcitonPhononCavityHole(ExcitonPhononCavityElectron):

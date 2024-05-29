@@ -243,7 +243,7 @@ class FPAFQMC(AFQMC):
         )
 
     def setup_estimators(
-        self, filename, additional_estimators: Optional[Dict[str, EstimatorBase]] = None
+            self, filename, additional_estimators: Optional[Dict[str, EstimatorBase]] = None, free_projection: bool = True
     ):
         self.accumulators = WalkerAccumulator(
             ["Weight", "WeightFactor", "HybridEnergy"], self.params.num_steps_per_block
@@ -261,6 +261,7 @@ class FPAFQMC(AFQMC):
                     verbose=(comm.rank == 0 and self.verbose),
                     filename=f"{filename}.{i}",
                     observables=("energy",),
+                    free_projection=free_projection
                 )
             )
         if additional_estimators is not None:
@@ -282,6 +283,7 @@ class FPAFQMC(AFQMC):
         estimator_filename="estimate.h5",
         verbose=True,
         additional_estimators: Optional[Dict[str, EstimatorBase]] = None,
+        free_projection=True
     ):
         """Perform FP AFQMC simulation on state object by Gaussian sampling of short time projection.
 
@@ -300,12 +302,12 @@ class FPAFQMC(AFQMC):
             self.walkers = psi
         self.setup_timers()
         eshift = 0.0
-        self.walkers.orthogonalise()
+        self.walkers.orthogonalise(free_projection)
 
         self.get_env_info()
         self.copy_to_gpu()
         self.distribute_hamiltonian()
-        self.setup_estimators(estimator_filename, additional_estimators=additional_estimators)
+        self.setup_estimators(estimator_filename, additional_estimators=additional_estimators, free_projection=free_projection)
 
         total_steps = self.params.num_steps_per_block * self.params.num_blocks
 

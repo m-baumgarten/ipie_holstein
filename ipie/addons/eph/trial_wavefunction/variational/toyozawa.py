@@ -18,9 +18,6 @@ from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.exciton_phonon_cavity import ExcitonPhononCavityElectron, ExcitonPhononCavityHole
-#from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
-#from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
-#from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel, BondSSHModel
 import jax
 import jax.numpy as npj
 import plum
@@ -100,10 +97,68 @@ class ToyozawaVariational(Variational):
 
             # Obtain projected energy of permuted soliton on original soliton
             projected_energy = self.projected_energy(self.ham, G_j, shift, beta_i)
-
+            #jax.debug.print('   e / o: {x}', x=((projected_energy * overlap).real, overlap.real))
             num_energy += (projected_energy * overlap).real
             denom += overlap.real
         energy = num_energy / denom
+        #jax.debug.print('energy / ovlp: {x}', x=(num_energy, denom))
+        return energy.real
+    
+    def _objective_function(self, x, zero_th: float = 1e-12) -> float:
+        """"""
+        e = self._objective_function(x)
+
+        shift, c0a, c0b = self.unpack_x(x)
+        shift_abs = npj.abs(shift)
+
+        num_energy = 0.0
+        denom = 0.0
+
+        for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
+
+            beta_i = shift[npj.array(permi)]
+            beta_i_abs = npj.abs(beta_i)
+            psia_i = c0a[permi, :]
+
+            for jp, (permj, coeffj) in enumerate(zip(self.perms, self.Kcoeffs)):
+                beta_j = shift[npj.array(permj)]
+                beta_j_abs = npj.abs(beta_j)
+                psia_j = c0a[permj, :]
+
+
+                overlap = npj.linalg.det(psia_j.conj().T.dot(psia_i)) * npj.prod(
+                    npj.exp(-0.5 * (beta_j_abs**2 + beta_i_abs**2) + beta_j.conj() * beta_i)
+                )
+            
+#            if self.sys.ndown > 0:
+#                psib_i = c0b[permi, :]
+#                overlap *= npj.linalg.det(c0b.conj().T.dot(psib_i))
+                overlap *= coeffj.conj() * coeffi
+    
+                if npj.abs(overlap) < zero_th:
+                    continue
+
+#            if ip != 0:
+#                overlap = overlap * (self.ham.nsites - ip) * 2
+#            else:
+#                overlap = overlap * self.ham.nsites
+
+            # Evaluate Greens functions
+                Ga_j = gab(psia_j, psia_i)
+#            if self.sys.ndown > 0:
+#                Gb_j = gab(c0b, psib_i)
+ #           else:
+                Gb_j = npj.zeros_like(Ga_j)
+                G_j = [Ga_j, Gb_j]
+
+            # Obtain projected energy of permuted soliton on original soliton
+                projected_energy = self.projected_energy(self.ham, G_j, beta_j, beta_i)
+    
+                num_energy += (projected_energy * overlap).real
+                denom += overlap.real
+        energy = num_energy / denom
+        print(e, energy.real)
+        assert npj.isclose(e, energy.real)
         return energy.real
 
     def get_args(self):
@@ -117,6 +172,7 @@ class ToyozawaVariational(Variational):
             el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
         phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
+#        jax.debug.print('kin, elph, ph: {x}', x=(kinetic, el_ph_contrib, phonon_contrib))
         return local_energy
 
     @plum.dispatch
@@ -128,4 +184,5 @@ class ToyozawaVariational(Variational):
             el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
         phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib + ferm_ferm_contrib
+        #jax.debug.print('quad:  {x}', x=(ham.quad[0], G[0]))
         return local_energy
