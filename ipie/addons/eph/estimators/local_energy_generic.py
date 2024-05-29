@@ -40,16 +40,16 @@ def local_energy_generic(
         energy[:, 1] += np.sum(hamiltonian.T[1] * G[1], axis=(1, 2))
 
     # Electron-Phonon Contribution
-    eph = np.einsum('ijk,ij,k->', hamiltonian.g_tensor, G[0], walkers.phonon_disp)
+    eph = np.einsum('ijk,nij,nk->n', hamiltonian.g_tensor, G[0], walkers.phonon_disp)
     if system.ndown > 0:
-        eph += np.einsum('ijk,ij,k->', hamiltonian.g_tensor, G[0], walkers.phonon_disp)
+        eph += np.einsum('ijk,nij,nk->n', hamiltonian.g_tensor, G[1], walkers.phonon_disp)
     energy[:, 2] = hamiltonian.const * eph
 
     # Phonon Contribution
-    energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0 ** 2 * np.sum(walkers.phonon_disp ** 2, axis=(1,2))
+    energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0 ** 2 * np.sum(walkers.phonon_disp ** 2, axis=1)
     energy[:, 3] -= 0.5 * hamiltonian.nsites * np.sum(hamiltonian.w0)
-    energy[:, 3] -= 0.5 * np.sum(trial.calc_phonon_laplacian(walkers) / hamiltonian.m, axis=(2))
-    
+    energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
+
     energy[:, 0] = np.sum(energy[:,1:], axis=1)
 
     return energy

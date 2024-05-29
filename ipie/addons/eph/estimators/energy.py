@@ -28,14 +28,14 @@ from ipie.utils.backend import arraylib as xp
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 
 
-@plum.dispatch
-def local_energy(
-    system: Generic,
-    hamiltonian: HolsteinModel,
-    walkers: EPhWalkers,
-    trial: EPhTrialWavefunctionBase,
-) -> numpy.ndarray:
-    return local_energy_holstein(system, hamiltonian, walkers, trial)
+#@plum.dispatch
+#def local_energy(
+#    system: Generic,
+#    hamiltonian: HolsteinModel,
+#    walkers: EPhWalkers,
+#    trial: EPhTrialWavefunctionBase,
+#) -> numpy.ndarray:
+#    return local_energy_holstein(system, hamiltonian, walkers, trial)
 
 @plum.dispatch
 def local_energy(
