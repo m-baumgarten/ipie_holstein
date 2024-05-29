@@ -339,7 +339,7 @@ class FPAFQMC(AFQMC):
             # TODO this is a factory method not a class
             if isinstance(self.trial, EPhTrialWavefunctionBase):
                 initial_walkers = EPhWalkersFP(
-                   initial_walker,
+                    initial_walker,
                     self.system.nup,
                     self.system.ndown,
                     self.hamiltonian.nsites,

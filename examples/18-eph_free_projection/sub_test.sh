@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=fp
+#SBATCH --job-name=band
 #SBATCH -p joonholee,unrestricted,intermediate
-#SBATCH -t 24:00:00
-#SBATCH -n 5
+#SBATCH -t 12:00:00
+#SBATCH -n 1
 #SBATCH --mem-per-cpu=1000
-#SBATCH -o test_3000.out
-#SBATCH -e test_3000.err
+#SBATCH -o test.out
+#SBATCH -e test.err
 
 source ~/.bashrc
 ulimit -s unlimited
@@ -14,4 +14,4 @@ conda activate ipie_dev
 #export PYTHONPATH=/n/home01/mbaumgarten/packages/ipie_devl/ipie:$PYTHONPATH
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-srun -n $SLURM_NTASKS --mpi=pmi2 python -u run_holstein_fp.py > output_3000walkers.txt
+srun python -u run_holstein_fp.py > output2.txt

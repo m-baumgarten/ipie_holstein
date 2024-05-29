@@ -2,16 +2,17 @@ import numpy as np
 from ipie.config import MPI
 from ipie.systems import Generic
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel
 from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 from ipie.addons.free_projection.walkers.eph_walkers import EPhWalkersFP
 from ipie.addons.eph.estimators.energy import EnergyEstimator
 from ipie.addons.free_projection.propagation.eph_propagator_fp import EPhPropagatorFP, EPhPropagatorFPImportance
+#from ipie.addons.eph.propagation.holstein import FreePropagationHolstein, FreePropagationHolsteinImportance
 comm = MPI.COMM_WORLD
 
 from ipie.addons.free_projection.qmc.options import QMCParamsFP
 from ipie.addons.free_projection.qmc.fp_afqmc_eph import FPAFQMC
-
 
 # System Parameters
 nup = 1
@@ -19,10 +20,10 @@ ndown = 0
 nelec = (nup, ndown)
 
 # Hamiltonian Parameters
-g = 3.0 #1.0
+g = 0.5 #1.0
 t = 1.0
-w0 = 3.0
-nsites = 5
+w0 = 1.0
+nsites = 16
 pbc = True
 k = 0
 nk = nsites//2 + 1
@@ -38,7 +39,7 @@ num_steps_per_block = 10
 
 # System and Hamiltonian setup
 system = Generic(nelec)
-ham = HolsteinModel(g=g, t=t, w0=w0, nsites=nsites, pbc=pbc)
+ham = AcousticSSHModel(g=g, t=t, w0=w0, nsites=nsites, pbc=pbc)
 ham.build()
 
 beta_shift = np.load('trial_ph_{:02d}.npy'.format(k))
@@ -74,9 +75,9 @@ params = QMCParamsFP(
 
 # Setup propagator
 if importance:
-    propagator = EPhPropagatorFPImportance(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.469)
+    propagator = EPhPropagatorFPImportance(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.2)
 else:
-    propagator = EPhPropagatorFP(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.469)
+    propagator = EPhPropagatorFP(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.2)
 propagator.build(ham, trial, walkers)
 
 fpafqmc = FPAFQMC(

@@ -18,6 +18,11 @@ np.random.seed(125)
 
 from ipie.systems import Generic
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+<<<<<<< HEAD
+=======
+from ipie.addons.eph.hamiltonians.ssh import AcousticSSHModel
+#from ipie.addons.eph.hamiltonians.general import HolsteinModelGeneric, SSHBondGeneric, SSHAcousticGeneric
+>>>>>>> df141e5 (man)
 from ipie.addons.eph.trial_wavefunction.variational.coherent_state import CoherentStateVariational
 from ipie.addons.eph.trial_wavefunction.variational.toyozawa import ToyozawaVariational
 
@@ -27,27 +32,35 @@ ndown = 0
 nelec = (nup, ndown)
 
 # Hamiltonian Parameters
-g = 3.0
+g = 0.5
 t = 1.0
-w0 = 3.0
-nsites = 5
+w0 = 1.0
+nsites = 16
 pbc = True
 
 # Setup initial guess for variational optimization
 initial_electron = np.random.random((nsites, nup + ndown))
-initial_phonons = np.random.normal(size=(nsites))
+initial_phonons = np.ones(nsites) * 0.1
+#initial_phonons = np.random.normal(size=(nsites))
 
 # System and Hamiltonian setup
 system = Generic(nelec)
+#ham = AcousticSSHModel(g=g, t=t, w0=w0, nsites=nsites, pbc=pbc)
 ham = HolsteinModel(g=g, t=t, w0=w0, nsites=nsites, pbc=pbc)
 ham.build()
 nk = nsites//2 + 1
 K = np.linspace(0, np.pi, nk, endpoint=True)
+K = [K[0]]
 
 # Variational procedure
-var = CoherentStateVariational(initial_phonons, initial_electron, ham, system, cplx=True)
+etrial = np.zeros(nk)
+
+#initial_electron = np.random.random((nsites, nup + ndown))
+#initial_phonons = np.random.normal(size=(nsites))
+#var = CoherentStateVariational(initial_phonons, initial_electron, ham, system, cplx=True)
 #var.initial_guess(ham)
-_, initial_phonons, initial_electron = var.run()
+#_, initial_phonons, initial_electron = var.run()
+#initial_electron = np.column_stack([initial_phonons, initial_electron, initial_electron])
 #initial_phonons = np.load('trials_40sites/trial_ph_19.npy')
 #initial_electron = np.load('trials_40sites/trial_el_19.npy')
 
