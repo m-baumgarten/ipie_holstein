@@ -35,7 +35,7 @@ comm = MPI.COMM_WORLD
 nwalkers = 200
 num_iterations_fp = 150
 num_blocks = 200
-num_steps_per_block = 10
+num_steps_per_block = 30
 
 # System and Hamiltonian setup
 system = Generic(nelec)
@@ -75,9 +75,9 @@ params = QMCParamsFP(
 
 # Setup propagator
 if importance:
-    propagator = EPhPropagatorFPImportance(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.2)
+    propagator = EPhPropagatorFPImportance(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.1)
 else:
-    propagator = EPhPropagatorFP(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.2)
+    propagator = EPhPropagatorFP(timestep=params.timestep, verbose=False, exp_nmax=10, ene_0=-2.1)
 propagator.build(ham, trial, walkers)
 
 fpafqmc = FPAFQMC(

@@ -34,8 +34,15 @@ class EPhPropagatorFP(EPhPropagatorFree):
         self.exp_nmax = exp_nmax
         self.eshift = ene_0
 
-    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+    def _update_weight(self, walkers, ovlp, ovlp_new) -> None:
         walkers.weight *= numpy.exp(self.dt_ph * self.eshift)
+
+    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+        ratio = ovlp_new / ovlp
+        phase = numpy.angle(ratio)
+
+        walkers.weight *= numpy.abs(ratio)
+        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
 
     def propagate_phonons(
         self, walkers: EPhWalkers, hamiltonian: GenericEPhModel, trial: EPhTrialWavefunctionBase
