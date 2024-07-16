@@ -80,9 +80,9 @@ def local_energy_holstein(
     walkers: EPhCoherentStateWalkers,
     trial: EPhTrialWavefunctionBase,
 ) -> np.ndarray:
-
     energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
-    
+   
+    ovlp = trial.calc_overlap(walkers)
     gf = trial.calc_greens_function(walkers)
     walkers.Ga, walkers.Gb = gf[0], gf[1]
 
@@ -95,5 +95,4 @@ def local_energy_holstein(
     energy[:, 3] = hamiltonian.w0 * trial.calc_harm_osc(walkers) 
 
     energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
-
     return energy

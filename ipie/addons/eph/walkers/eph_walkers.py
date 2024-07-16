@@ -61,9 +61,10 @@ class EPhWalkers(BaseWalkers):
         self.weight = numpy.ones(self.nwalkers, dtype=numpy.complex128)
 
         self.phonon_disp = xp.array(
-            [initial_walker[:, 0].real.copy() for iw in range(self.nwalkers)], dtype=xp.complex128
+            [initial_walker[:, 0].copy() for iw in range(self.nwalkers)], dtype=xp.complex128
         )
         self.phonon_disp = numpy.squeeze(self.phonon_disp)
+        self.coherent_state_shift = self.phonon_disp
 
         self.phia = xp.array(
             [initial_walker[:, 1 : self.nup + 1].copy() for iw in range(self.nwalkers)],
@@ -197,8 +198,7 @@ class EPhCoherentStateWalkers(EPhWalkers):
         self.ph_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
         self.el_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
         self.ovlp_perm = numpy.zeros(shape, dtype=numpy.complex128)
-
-
+        
         self.Ga_perm = numpy.zeros(shape_G, dtype=numpy.complex128)
         self.Gb_perm = numpy.zeros_like(self.Ga_perm)
 

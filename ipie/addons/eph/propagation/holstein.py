@@ -242,21 +242,31 @@ class HolsteinPropagatorFree:
     def update_weight(self, walkers, ovlp, ovlp_new) -> None:
 
         ratio = ovlp_new / ovlp
-        print('ratio:   ', ratio[0])
+#        print('ratio:   ', ratio[0])
         phase = numpy.angle(ratio)
-        import matplotlib.pyplot as plt
-        plt.plot(numpy.sort(ratio.real))
-        plt.plot(numpy.sort(ratio.imag))
-        plt.show()
+#        print('phase:   ', phase[0])       
         abs_phase = numpy.abs(phase)
         cos_phase = numpy.cos(phase)
-        print('update I:   ', walkers.weight[0])
+#        print('update I:   ', walkers.weight[0])
         walkers.weight *= numpy.where(
             abs_phase < 0.5 * numpy.pi,  # <
             numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0),  # >
             0.0,
         )
-        print('update II:   ', walkers.weight[0])
+#        print('update II:   ', walkers.weight[0])
+
+#    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+#
+#        ratio = ovlp_new / ovlp
+#        phase = numpy.angle(ratio)
+#
+#        abs_phase = numpy.abs(phase)
+##        cos_phase = numpy.cos(phase)
+#        walkers.weight *= numpy.where(
+#            abs_phase < 0.5 * numpy.pi, #<
+#            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
+#            0.0,
+#        )
 
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return -hamiltonian.g * walkers.phonon_disp
@@ -336,12 +346,12 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
         hamiltonian: HolsteinModel,
         trial: EPhTrialWavefunctionBase,
     ) -> None:
-        print('prop_ph I:   ', walkers.weight[0])
+ #       print('prop_ph I:   ', walkers.weight[0])
         walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
         weight_exponent = -0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1)
         weight_exponent *= numpy.exp(self.dt * hamiltonian.w0) - 1
         walkers.weight *= numpy.exp(weight_exponent)
-        print('prop_ph II:   ', walkers.weight[0], numpy.exp(weight_exponent)[0], weight_exponent[0])
+ #       print('prop_ph II:   ', walkers.weight[0], numpy.exp(weight_exponent)[0], weight_exponent[0])
 
     def propagate_electron(
         self,
@@ -354,15 +364,10 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
         synchronize()
         self.timer.tgf += time.time() - start_time
 
-        print('prop_el I:   ', walkers.weight[0])
-        print('prop_el II:  ', walkers.weight[0])
-
         N = numpy.random.normal(loc=0.0, scale=1.0, size=(2, walkers.nwalkers, self.nsites))
         new_coherent_shift = N[0] + 1j * N[1]
 
-        print('prop_el III: ', walkers.weight[0])
-
-        EPh = self.construct_EPh(walkers, hamiltonian, new_coherent_shift)
+        EPh = self.construct_EPh(walkers, hamiltonian, new_coherent_shift, trial)
         expEph = numpy.exp(-self.dt * EPh)
 
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
@@ -374,14 +379,66 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
             walkers.phib = numpy.einsum("ni,nie->nie", expEph, walkers.phib)
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
         
-        weight_exp1 = numpy.einsum('ni,ni->n', new_coherent_shift.real, walkers.coherent_state_shift.imag)
-        weight_exp2 = numpy.einsum('ni,ni->n', new_coherent_shift.imag, walkers.coherent_state_shift.real)
-#        walkers.weight *= numpy.exp(1j * (new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real))
-        walkers.phia = numpy.einsum('nie,n->nie', walkers.phia, numpy.exp(1j * (weight_exp1 - weight_exp2)))
+        
+#        walkers.weight *= 2
+        gamma = new_coherent_shift + walkers.coherent_state_shift
+        weight_fac = numpy.exp(1j * numpy.sum(gamma.real * walkers.coherent_state_shift.imag - gamma.imag * walkers.coherent_state_shift.real, axis=1))
+        phase = numpy.angle(weight_fac)
+        abs_phase = numpy.abs(phase)
+        cos_phase = numpy.cos(phase)
+        walkers.weight *= numpy.where(
+            abs_phase < 0.5 * numpy.pi,  # <
+            numpy.abs(weight_fac) * numpy.where(cos_phase > 0.0, cos_phase, 0.0),  # >
+            0.0,
+        ).astype(numpy.complex128)
+        print('prop_el I: ', walkers.weight[0])
+
+        walkers.weight *= 2 * numpy.exp(hamiltonian.g * self.dt * numpy.sum(trial.mf_eph)) # * np.abs(phase)
+#        walkers.weight *= 2 * numpy.exp(1j * numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real, axis=1))
+#        print('phase:   ', 2 * numpy.exp(1j * numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real, axis=1)))
+        
+        print('prop_el II: ', walkers.weight[0])
+#        exit()
+#        weight_exp1 = numpy.einsum('ni,ni->n', new_coherent_shift.real, walkers.coherent_state_shift.imag)
+#        weight_exp2 = numpy.einsum('ni,ni->n', new_coherent_shift.imag, walkers.coherent_state_shift.real)
+#        walkers.phia = numpy.einsum('nie,n->nie', walkers.phia, numpy.exp(1j * (weight_exp1 - weight_exp2)))
+        
         walkers.coherent_state_shift += new_coherent_shift
-        print('prop_el IV: ', walkers.weight[0])
+#        print('prop_el II: ', walkers.weight[0])
+       #exit()
 
     def construct_EPh(
-        self, walkers: EPhCoherentStateWalkers, hamiltonian: HolsteinModel, new_shift: numpy.ndarray
+        self, walkers: EPhCoherentStateWalkers, hamiltonian: HolsteinModel, new_shift: numpy.ndarray, trial
     ) -> numpy.ndarray:
-        return -hamiltonian.g * (new_shift.conj() + 2 * walkers.coherent_state_shift.real)
+        return -hamiltonian.g * (new_shift.conj() + 2 * walkers.coherent_state_shift.real - trial.mf_eph)# + 0.5) 
+
+    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+       # print(ovlp, ovlp_new)
+       # exit()
+        ratio = ovlp_new / ovlp #* walkers.weight
+        print('ratio:   ', ratio[0])
+        phase = numpy.angle(ratio)
+        print('phase:   ', phase[0])
+        abs_phase = numpy.abs(phase)
+        cos_phase = numpy.cos(phase)
+        print('update I:   ', walkers.weight[0])
+        walkers.weight *= numpy.where(
+            abs_phase < 0.5 * numpy.pi,  # <
+            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0),  # >
+            0.0,
+        ).astype(numpy.complex128)
+        print('update II:   ', walkers.weight[0])
+        exit()
+
+#    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+#
+#        ratio = ovlp_new / ovlp
+#        phase = numpy.angle(ratio)
+#
+#        abs_phase = numpy.abs(phase)
+##        cos_phase = numpy.cos(phase)
+#        walkers.weight *= numpy.where(
+#            abs_phase < 0.5 * numpy.pi, #<
+#            numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
+#            0.0,
+#        )

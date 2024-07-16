@@ -84,6 +84,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         num_energy = 0.0
         num_ph_energy = 0.0
+        num_meanfield = np.zeros(ham.nsites, dtype=np.complex128)
         denom = 0.0
         # Recover beta from expected position <X> we store as beta_shift
         beta0 = self.beta_shift * np.sqrt(0.5 * ham.m * ham.w0)
@@ -126,11 +127,13 @@ class ToyozawaTrial(CoherentStateTrial):
 
             num_energy += np.real((kinetic + e_ph + e_eph) * ov)
             num_ph_energy += np.real(e_ph * ov)
+            num_meanfield += np.real(np.dot(rho, beta0.conj() + beta_i) * ov)
             denom += np.real(ov)
 
         etrial = num_energy / denom
         etrial_ph = num_ph_energy / denom
-        return etrial, etrial_ph
+        meanfield = num_meanfield / denom
+        return etrial, etrial_ph, meanfield
 
     def calc_overlap_perm(self, walkers: EPhWalkers) -> np.ndarray:
         r"""Computes the product of electron and phonon overlaps for each
@@ -178,6 +181,8 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         ovlp_perm = self.calc_overlap_perm(walkers)
         ovlp = np.sum(ovlp_perm, axis=1)
+        #print('cs shift:    ', walkers.coherent_state_shift[0])
+        #print('el:          ', walkers.phia[0,:,0])
         return ovlp
 
     def calc_phonon_overlap_perms(self, walkers: EPhWalkers) -> np.ndarray:
@@ -370,6 +375,7 @@ class ToyozawaTrial(CoherentStateTrial):
             ot *= coeff.conj()
 
             walkers.el_ovlp[:, ip] = ot
+#        print(walkers.el_ovlp)
         return walkers.el_ovlp
 
     def calc_electronic_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -426,7 +432,7 @@ class ToyozawaTrial(CoherentStateTrial):
                 walkers.Gb_perm[:,:,:,ip] = xp.einsum("nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp)
 #                Gb += xp.einsum(
 #                    "nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp
- #               )
+#                )
                 Gb += walkers.Gb_perm[:,:,:,ip] 
 
 #        assert np.allclose(walkers.ovlp, np.sum(walkers.ovlp_perm, axis=1))

@@ -53,7 +53,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
         self.nsites = self.nbasis
 
         # This beta_shift now corresponds to <X>, which is less tedious to work with
-        self.beta_shift = np.squeeze(wavefunction[:, 0]) * np.sqrt(2 / (self.m * self.w0))
+        self.beta_shift = np.squeeze(wavefunction[:, 0]) # * np.sqrt(2 / (self.m * self.w0))
         self.psia = wavefunction[:, 1 : self.nup + 1]
         self.psib = wavefunction[:, self.nup + 1 : self.nup + self.ndown + 1]
         # NOTE these may generally be complex arrays
@@ -75,7 +75,7 @@ class CoherentStateTrial(EPhTrialWavefunctionBase):
             Variational trial energy
         """
         # Recover beta from <X>
-        beta0 = self.beta_shift * np.sqrt(0.5 * self.m * self.w0)
+ #       beta0 = self.beta_shift * np.sqrt(0.5 * self.m * self.w0)
         
         Ga, _, _ = gab_mod_ovlp(self.psia, self.psia)
         if self.ndown > 0:
