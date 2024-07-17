@@ -3,12 +3,13 @@ import plum
 
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 
 from ipie.systems.generic import Generic
 from ipie.utils.backend import arraylib as xp 
 
-
+@plum.dispatch
 def local_energy_generic(
     system: Generic, 
     hamiltonian: GenericEPhModel, 
@@ -52,4 +53,27 @@ def local_energy_generic(
 
     energy[:, 0] = np.sum(energy[:,1:], axis=1)
 
+    return energy
+
+@plum.dispatch
+def local_energy_generic(
+    system: Generic,
+    hamiltonian: GenericEPhModel,
+    walkers: EPhCSWalkers,
+    trial: EPhTrialWavefunctionBase,
+) -> np.ndarray:
+    energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
+
+    #ovlp = trial.calc_overlap(walkers)
+    G = trial.calc_greens_function(walkers)
+    walkers.Ga, walkers.Gb = G[0], G[1]
+
+    energy[:, 1] = np.sum(hamiltonian.T[0] * G[0], axis=(1, 2))
+    if system.ndown > 0:
+        energy[:, 1] += np.sum(hamiltonian.T[1] * G[1], axis=(1, 2))
+
+    energy[:, 2] = trial.calc_phonon_displacement(walkers, hamiltonian)
+    energy[:, 3] = hamiltonian.w0 * trial.calc_harm_osc(walkers)
+
+    energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
     return energy
