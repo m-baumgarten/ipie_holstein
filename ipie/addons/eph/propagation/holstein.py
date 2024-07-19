@@ -353,6 +353,7 @@ class HolsteinPropagatorCoherentStateWalkers(HolsteinPropagatorFree):
         weight_exponent = -0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1)
         weight_exponent *= numpy.exp(self.dt * hamiltonian.w0) - 1
         walkers.weight *= numpy.exp(weight_exponent)
+        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
 
     def propagate_electron(
         self,
