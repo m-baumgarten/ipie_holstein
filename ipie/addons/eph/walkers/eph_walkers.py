@@ -65,6 +65,8 @@ class EPhWalkers(BaseWalkers):
         )
         self.phonon_disp = numpy.squeeze(self.phonon_disp)
         self.coherent_state_shift = self.phonon_disp
+#        self.coherent_state_shift += xp.random.normal(loc=0.0, scale=1., size=self.coherent_state_shift.shape)
+#        self.coherent_state_shift = xp.zeros_like(self.coherent_state_shift)
 
         self.phia = xp.array(
             [initial_walker[:, 1 : self.nup + 1].copy() for iw in range(self.nwalkers)],

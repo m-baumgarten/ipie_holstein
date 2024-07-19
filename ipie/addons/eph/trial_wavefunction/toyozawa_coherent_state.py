@@ -113,8 +113,10 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         r""""""
 #        print('ph_ovlp I: ', walkers.ph_ovlp[:1, :], walkers.coherent_state_shift[0,:])
         for ip, perm in enumerate(self.perms):
-#            ph_ov = np.exp(-0.5 * (np.abs(self.beta_shift[perm])**2 + np.abs(walkers.coherent_state_shift)**2 - 2*self.beta_shift[perm].conj() * walkers.coherent_state_shift))
-            ph_ov = np.exp(self.beta_shift[perm].conj() * walkers.coherent_state_shift)
+            # Normalized CS
+            ph_ov = np.exp(-0.5 * (np.abs(self.beta_shift[perm])**2 + np.abs(walkers.coherent_state_shift)**2 - 2*self.beta_shift[perm].conj() * walkers.coherent_state_shift))
+            # Unnormalized CS
+            #ph_ov = np.exp(self.beta_shift[perm].conj() * walkers.coherent_state_shift)
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
 
 #        print('ph_ovlp II: ', walkers.ph_ovlp[:1, :])
