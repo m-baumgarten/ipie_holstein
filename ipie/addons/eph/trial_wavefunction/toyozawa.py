@@ -121,10 +121,9 @@ class ToyozawaTrial(CoherentStateTrial):
 
             kinetic = np.sum(ham.T[0] * G_i[0] + ham.T[1] * G_i[1])
             e_ph = ham.w0 * np.sum(beta0.conj() * beta_i)
-            #rho = ham.g_tensor * (G_i[0] + G_i[1])
-            #e_eph = np.sum(np.dot(rho, beta0.conj() + beta_i))
             e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G_i[0], beta0.conj() + beta_i)
-            if ip != 0:
+            #if ip != 0:
+            if self.ndown > 0:    
                 e_eph += np.einsum('ijk,ij,k->', ham.g_tensor, G_i[1], beta0.conj() + beta_i)
 
             num_energy += np.real((kinetic + e_ph + e_eph) * ov)
@@ -407,20 +406,25 @@ class ToyozawaTrial(CoherentStateTrial):
         Ga = np.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=np.complex128)
         Gb = np.zeros_like(Ga)
         
-        for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
+        for ip, (ovlp, perm) in enumerate(zip(walkers.ovlp_perm.T, self.perms)):
             inv_Oa = xp.linalg.inv(
                 xp.einsum("nie,if->nef", walkers.phia, self.psia[perm, :].conj())
             )
 #            Ga += xp.einsum("nie,nef,jf,n->nij", walkers.phia, inv_Oa, self.psia[perm].conj(), ovlp)    #flip ij in the end TODO
-            Ga += xp.einsum("ie,nef,njf,n->nij", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
+#            Ga += xp.einsum("ie,nef,njf,n->nij", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
+            walkers.Ga_perm[:,:,:,ip] = xp.einsum("ie,nef,njf,n->nji", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
+            Ga += walkers.Ga_perm[:,:,:,ip]
 
             if self.ndown > 0:
                 inv_Ob = xp.linalg.inv(
                     xp.einsum("nie,if->nef", walkers.phib, self.psib[perm, :].conj())
                 )
-                Gb += xp.einsum(
-                    "ie,nef,njf,n->nij", self.psib[perm].conj(), inv_Ob, walkers.phia, ovlp
-                )
+                walkers.Gb_perm[:,:,:,ip] = xp.einsum("nie,nef,jf,n->nji", walkers.phib, inv_Ob, self.psib[perm].conj(), ovlp)
+                Gb += walkers.Gb_perm[:,:,:,ip] 
+
+#                Gb += xp.einsum(
+#                    "ie,nef,njf,n->nij", self.psib[perm].conj(), inv_Ob, walkers.phia, ovlp
+#                )
         
 #        print('Ga:  ', Ga, '\nGa_swap:  ', np.swapaxes(Ga, 1, 2))
 #        assert (np.allclose(Ga, np.swapaxes(Ga, 1, 2)))

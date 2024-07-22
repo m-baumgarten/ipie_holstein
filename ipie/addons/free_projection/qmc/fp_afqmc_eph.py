@@ -27,6 +27,7 @@ from ipie.addons.free_projection.propagation.free_propagation import FreePropaga
 from ipie.addons.free_projection.qmc.options import QMCParamsFP
 from ipie.addons.free_projection.walkers.uhf_walkers import UHFWalkersFP
 from ipie.addons.free_projection.walkers.eph_walkers import EPhWalkersFP
+from ipie.addons.free_projection.walkers.cs_walkers import EPhCSWalkersFP
 from ipie.estimators.estimator_base import EstimatorBase
 from ipie.hamiltonians.utils import get_hamiltonian
 from ipie.qmc.afqmc import AFQMC
@@ -38,6 +39,7 @@ from ipie.walkers.base_walkers import WalkerAccumulator
 from ipie.walkers.walkers_dispatch import get_initial_walker
 
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
+from ipie.addons.eph.trial_wavefunction.toyozawa_cs import ToyozawaTrialCoherentState
 from ipie.walkers.pop_controller import PopController
 
 def get_initial_walker_fp(trial) -> numpy.ndarray:
@@ -337,7 +339,15 @@ class FPAFQMC(AFQMC):
             block_number = 0
             _, initial_walker = get_initial_walker_fp(self.trial)
             # TODO this is a factory method not a class
-            if isinstance(self.trial, EPhTrialWavefunctionBase):
+            if isinstance(self.trial, ToyozawaTrialCoherentState):
+                initial_walkers = EPhCSWalkersFP(
+                    initial_walker,
+                    self.system.nup,
+                    self.system.ndown,
+                    self.hamiltonian.nsites,
+                    self.params.num_walkers,
+                )
+            elif isinstance(self.trial, EPhTrialWavefunctionBase):
                 initial_walkers = EPhWalkersFP(
                     initial_walker,
                     self.system.nup,

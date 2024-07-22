@@ -21,11 +21,16 @@ from ipie.utils.backend import arraylib as xp
 from ipie.systems.generic import Generic
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
-from ipie.addons.eph.estimators.local_energy_generic import local_energy_generic
+from ipie.addons.eph.estimators.local_energy_generic import local_energy_generic 
 
 @plum.dispatch
 def local_energy(system: Generic, hamiltonian: GenericEPhModel, walkers: EPhWalkers, trial: EPhTrialWavefunctionBase):
+    return local_energy_generic(system, hamiltonian, walkers, trial)
+
+@plum.dispatch
+def local_energy(system: Generic, hamiltonian: GenericEPhModel, walkers: EPhCSWalkers, trial: EPhTrialWavefunctionBase):
     return local_energy_generic(system, hamiltonian, walkers, trial)
 
 class EnergyEstimatorFP(EnergyEstimator):

@@ -172,7 +172,6 @@ class ToyozawaVariational(Variational):
             el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
         phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
-#        jax.debug.print('kin, elph, ph: {x}', x=(kinetic, el_ph_contrib, phonon_contrib))
         return local_energy
 
     @plum.dispatch

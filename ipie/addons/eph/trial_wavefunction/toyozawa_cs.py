@@ -33,7 +33,8 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         verbose: bool = False,
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, K, verbose=verbose)
-    
+        self.beta_shift /= np.sqrt(2 / (self.m * self.w0))
+
     def calc_energy(self, ham, zero_th=1e-12):
         r"""Computes the variational energy of the trial, i.e.
 
@@ -94,37 +95,40 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
 
             kinetic = np.sum(ham.T[0] * G_i[0] + ham.T[1] * G_i[1])
             e_ph = ham.w0 * np.sum(beta0.conj() * beta_i)
-            rho = ham.g_tensor * (G_i[0] + G_i[1])
-            e_eph = np.sum(np.dot(rho, beta0.conj() + beta_i))
+            e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G_i[0], beta0.conj() + beta_i)
+#            if ip != 0:
+            if self.ndown > 0:
+                e_eph += np.einsum('ijk,ij,k->', ham.g_tensor, G_i[1], beta0.conj() + beta_i)
+#            rho = ham.g_tensor * (G_i[0] + G_i[1])
+#            e_eph = np.sum(np.dot(rho, beta0.conj() + beta_i))
 
             num_energy += np.real((kinetic + e_ph + e_eph) * ov)
             num_ph_energy += np.real(e_ph * ov)
-            num_meanfield += np.real(np.dot(rho, beta0.conj() + beta_i) * ov)
+            num_meanfield += np.real(np.einsum('ijk,ij,k->k', ham.g_tensor, G_i[0], beta0.conj() + beta_i) * ov)
             denom += np.real(ov)
 
         etrial = num_energy / denom
         etrial_ph = num_ph_energy / denom
-        meanfield = num_meanfield / denom
-        return etrial, etrial_ph, meanfield
+        self.mf_eph = num_meanfield / denom
+        return etrial, etrial_ph
 
     def calc_phonon_overlap_perms(self, walkers: EPhCSWalkers) -> np.ndarray:
         r""""""
-        print('ph_ovlp I: ', walkers.ph_ovlp[:1, :])
+       # print('ph_ovlp I: ', walkers.ph_ovlp[:1, :])
         for ip, perm in enumerate(self.perms):
             ph_ov = np.exp(-0.5 * (np.abs(self.beta_shift[perm])**2 + np.abs(walkers.coherent_state_shift)**2 - 2*self.beta_shift[perm].conj() * walkers.coherent_state_shift))
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
 
-        print('ph_ovlp II: ', walkers.ph_ovlp[:1, :])
+       # print('ph_ovlp II: ', walkers.ph_ovlp[:1, :])
         return walkers.ph_ovlp
 
     def calc_phonon_displacement(self, walkers: EPhCSWalkers, ham) -> np.ndarray:
         r""""""
         displacement = np.zeros((walkers.nwalkers, self.nperms), dtype=xp.complex128)
-        for ip, (ovlp, Ga, Gb, perm) in enumerate(zip(walkers.ovlp_perm.T, walkers.Ga_perm.T, walkers.Gb_perm.T, self.perms)):
-            displacement[:, ip] = np.einsum('ijk,ijn,nk->n', ham.g_tensor, Ga, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
+        for ip, (Ga, Gb, perm) in enumerate(zip(walkers.Ga_perm.T, walkers.Gb_perm.T, self.perms)):
+            displacement[:, ip] = np.einsum('ijk,jin,nk->n', ham.g_tensor, Ga, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
             if self.ndown > 0:
-                displacement[:, ip] += np.einsum('ijk,ijn,nk->n', ham.g_tensor, Gb, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
-        
+                displacement[:, ip] += np.einsum('ijk,jin,nk->n', ham.g_tensor, Gb, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
         displacement = np.einsum("np,n->n", displacement, 1 / np.sum(walkers.ovlp_perm, axis=1)) 
         return displacement 
 
