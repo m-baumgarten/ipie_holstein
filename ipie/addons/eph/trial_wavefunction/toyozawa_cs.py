@@ -15,7 +15,7 @@
 import numpy as np
 from typing import Tuple
 
-from ipie.addons.eph.walkers.eph_walkers import EPhCoherentStateWalkers
+from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm
 from ipie.utils.backend import arraylib as xp
@@ -107,7 +107,7 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         meanfield = num_meanfield / denom
         return etrial, etrial_ph, meanfield
 
-    def calc_phonon_overlap_perms(self, walkers: EPhCoherentStateWalkers) -> np.ndarray:
+    def calc_phonon_overlap_perms(self, walkers: EPhCSWalkers) -> np.ndarray:
         r""""""
         print('ph_ovlp I: ', walkers.ph_ovlp[:1, :])
         for ip, perm in enumerate(self.perms):
@@ -117,18 +117,18 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         print('ph_ovlp II: ', walkers.ph_ovlp[:1, :])
         return walkers.ph_ovlp
 
-    def calc_phonon_displacement(self, walkers: EPhCoherentStateWalkers, ham) -> np.ndarray:
+    def calc_phonon_displacement(self, walkers: EPhCSWalkers, ham) -> np.ndarray:
         r""""""
         displacement = np.zeros((walkers.nwalkers, self.nperms), dtype=xp.complex128)
         for ip, (ovlp, Ga, Gb, perm) in enumerate(zip(walkers.ovlp_perm.T, walkers.Ga_perm.T, walkers.Gb_perm.T, self.perms)):
-            displacement[:, ip] = np.einsum('ijk,ijn,nk->n', ham.g_tensor, Ga, self.beta_shift[perm].conj() + walkers.coherent_state_shift) * ovlp
+            displacement[:, ip] = np.einsum('ijk,ijn,nk->n', ham.g_tensor, Ga, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
             if self.ndown > 0:
-                displacement[:, ip] += np.einsum('ijk,ijn,nk->n', ham.g_tensor, Gb, self.beta_shift[perm].conj() + walkers.coherent_state_shift) * ovlp
+                displacement[:, ip] += np.einsum('ijk,ijn,nk->n', ham.g_tensor, Gb, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
         
         displacement = np.einsum("np,n->n", displacement, 1 / np.sum(walkers.ovlp_perm, axis=1)) 
         return displacement 
 
-    def calc_harm_osc(self, walkers: EPhCoherentStateWalkers) -> np.ndarray:
+    def calc_harm_osc(self, walkers: EPhCSWalkers) -> np.ndarray:
         r""""""
         harm_osc = np.zeros((walkers.nwalkers, self.nperms), dtype=xp.complex128)
         for ip, (ovlp, perm) in enumerate(zip(walkers.ovlp_perm.T, self.perms)):
