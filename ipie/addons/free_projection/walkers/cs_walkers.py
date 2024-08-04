@@ -22,8 +22,9 @@ from ipie.walkers.base_walkers import BaseWalkers
 from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
 
 class EPhCSWalkersFP(EPhCSWalkers):
-#    def __init__(self, initial_walker: numpy.ndarray, nup: int, ndown: int, nbasis: int, nwalkers: int, verbose: bool = False):
-#        super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
+    def __init__(self, initial_walker: numpy.ndarray, nup: int, ndown: int, nbasis: int, nwalkers: int, verbose: bool = False):
+        super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
+        self.weight_log = xp.log(self.weight)
 
     def orthogonalise(self, free_projection=True):
         """Orthogonalise all walkers.
@@ -36,6 +37,7 @@ class EPhCSWalkersFP(EPhCSWalkers):
         detR = self.reortho()
         if free_projection:
             magn, dtheta = xp.abs(self.detR), xp.angle(self.detR)
+            self.weight_log += xp.log(magn)
             self.weight *= magn
             self.phase *= xp.exp(1j * dtheta)
         return detR

@@ -25,7 +25,7 @@ from typing import Tuple, Union
 import h5py
 import numpy
 
-from ipie.addons.free_projection.estimators.energy import EnergyEstimatorFP
+from ipie.addons.free_projection.estimators.energy_eph import EnergyEstimatorFP
 from ipie.addons.free_projection.estimators.energy_eph import EnergyEstimatorFPImportance
 from ipie.config import MPI
 from ipie.estimators.handler import EstimatorHandler

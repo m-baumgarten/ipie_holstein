@@ -34,10 +34,11 @@ class EPhPropagatorFP(EPhPropagatorFree):
         self.exp_nmax = exp_nmax
         self.eshift = ene_0
 
-    def _update_weight(self, walkers, ovlp, ovlp_new) -> None:
+    #is this the correct update?
+    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
         walkers.weight *= numpy.exp(self.dt_ph * self.eshift)
 
-    def update_weight(self, walkers, ovlp, ovlp_new) -> None:
+    def _update_weight(self, walkers, ovlp, ovlp_new) -> None:
         ratio = ovlp_new / ovlp
         phase = numpy.angle(ratio)
 

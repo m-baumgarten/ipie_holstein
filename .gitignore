@@ -6,6 +6,9 @@
 *.out
 *.hdf5
 *.h5 # Make these hard to add
+*.err
+*.sh
+*.npy
 src/openfermion/data/
 
 # Byte-compiled / optimized / DLL files

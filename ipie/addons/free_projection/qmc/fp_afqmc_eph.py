@@ -388,13 +388,13 @@ class FPAFQMC(AFQMC):
                     self.walkers, self.hamiltonian, self.trial, eshift
                 )
 
-                if step > 1:
+                if step > 1 and self.params.pop_control_freq != -1:
                     wbound = self.pcontrol.total_weight * 0.10
                     numpy.clip(
                         self.walkers.weight, a_min=-wbound, a_max=wbound, out=self.walkers.weight
                     )  # in-place clipping
 
-                if step % self.params.pop_control_freq == 0:     
+                if step % self.params.pop_control_freq == 0 and self.params.pop_control_freq != -1:     
                     self.pcontrol.pop_control(self.walkers, comm)
 
                 self.tprop_ovlp = self.propagator.timer.tovlp
