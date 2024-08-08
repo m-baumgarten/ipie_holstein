@@ -45,9 +45,10 @@ def circ_perm(hamiltonian, k) -> np.ndarray:
     perms = np.zeros((hamiltonian.N, hamiltonian.N), dtype=np.int32)
     lattice = np.arange(hamiltonian.N, dtype=np.int32).reshape(nsites)
 
-    kcoeffs = np.zeros(hamiltonian.N, dtype=np.complex128)
+    kcoeffs = np.ones(hamiltonian.N, dtype=np.complex128)
     if hamiltonian.dim == 1:
         perms = circ_perm_1D(nsites[0])
+        kcoeffs = np.exp(1j * np.arange(hamiltonian.N) * k[0])
 
     elif hamiltonian.dim == 2:
         perms_x = circ_perm_1D(nsites[0])
@@ -67,7 +68,7 @@ def circ_perm(hamiltonian, k) -> np.ndarray:
             for yi, perm_y in enumerate(perms_y):
                 for zi, perm_z in enumerate(perms_z):
                     index = xi * nsites[1] * nsites[2] + yi * nsites[2] + zi
-                    perms[index, :] = lattice[perm_x, perm_y, perm_z].reshape(hamiltonian.N).astype(np.int)
+                    perms[index, :] = lattice[perm_x, perm_y, perm_z].reshape(hamiltonian.N).astype(np.int32)
     
     return perms, kcoeffs 
 
@@ -132,18 +133,23 @@ class ToyozawaVariational(Variational):
     ):
         super().__init__(shift_init, electron_init, hamiltonian, system, cplx)
         if isinstance(K, float):
+#            print(K)
             self.K = np.array([K])
+#            print('ey')
         else:
             self.K = K
-        self.perms, kcoeff = circ_perm(hamiltonian, K)
-        print(self.perms)
+#        print(self.K)
+#        exit()
+        self.perms, kcoeff = circ_perm(hamiltonian, self.K)
+#        print(self.perms)
         self.nperms = self.perms.shape[0]
-        self.Kcoeffs = get_kcoeffs(hamiltonian, K)
+        self.Kcoeffs = get_kcoeffs(hamiltonian, self.K)
         assert np.all(kcoeff == self.Kcoeffs)
 
-    def objective_function_final(self, x, zero_th: float = 1e-12) -> float:
+    def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
+        shift = npj.squeeze(shift)
         shift_abs = npj.abs(shift)
 
         num_energy = 0.0
@@ -182,13 +188,15 @@ class ToyozawaVariational(Variational):
             num_energy += (projected_energy * overlap).real
             denom += overlap.real
         energy = num_energy / denom
-        jax.debug.print('energy:    {x}', x=energy)
+#        jax.debug.print('energy:    {x}', x=energy)
         return energy.real
     
-    def objective_function(self, x, zero_th: float = 1e-12) -> float:
+    def _objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
         shift_abs = npj.abs(shift)
+#        jax.debug.print('shift {x}', x=shift.shape)
+        shift = npj.squeeze(shift)
 
         num_energy = 0.0
         denom = 0.0

@@ -34,10 +34,12 @@ class Variational(metaclass=ABCMeta):
         cplx: bool = True,
     ):
         self.psi = electron_init.T.ravel()
-        self.shift = shift_init.T.ravel()
+        self.shift = shift_init.ravel() #T before
 
         self.ham = hamiltonian
         self.sys = system
+    
+        self.shift_params_rows = 1 # D2 and Toyozawa Ansatz
 
         if cplx:
             self.pack_x = self.pack_x_complex
@@ -93,54 +95,60 @@ class Variational(metaclass=ABCMeta):
         return etrial, beta_shift, psi
 
     def pack_x_complex(self) -> np.ndarray:
-        x = np.zeros(2 * (self.sys.nup + self.sys.ndown + self.ham.dim) * self.ham.N)
-        x[: self.ham.N * self.ham.dim] = self.shift.real
-        x[self.ham.N * self.ham.dim : 2 * self.ham.N * self.ham.dim] = self.shift.imag
-        x[2 * self.ham.N * self.ham.dim : (2 * self.ham.dim + self.sys.ndown + self.sys.nup) * self.ham.N] = (
+        nparams = 2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_complex = 2 * index_shift_real  
+        index_psi_real = index_shift_complex + (self.sys.ndown + self.sys.nup) * self.ham.N
+        index_psi_complex = index_psi_real + (self.sys.ndown + self.sys.nup) * self.ham.N
+        
+        x = np.zeros(nparams)
+        x[: index_shift_real] = self.shift.real
+        x[index_shift_real : index_shift_complex] = self.shift.imag
+        x[index_shift_complex : index_psi_real] = (
             self.psi.real
         )
-        x[(2 * self.ham.dim + self.sys.ndown + self.sys.nup) * self.ham.N :] = self.psi.imag
+        x[index_psi_real : index_psi_complex] = self.psi.imag
         return x
 
     def unpack_x_complex(self, x: np.ndarray) -> Tuple:
         """Extracts shift and Slater determinants from x array, which is passed to
         the objective function."""
-        shift_real = x[0 : self.ham.N * self.ham.dim].copy()
-        shift_real = jax.numpy.reshape(shift_real, (self.ham.dim, self.ham.N)).T
+        # Make these class attributes s.t. we only need to change these for defining D1 or D2 trial
+        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_complex = 2 * index_shift_real
+        index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
+
+        shift_real = x[ : index_shift_real].copy()
+        shift_real = jax.numpy.reshape(shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows))
         shift_real = shift_real.astype(np.float64)
-        shift_complex = x[self.ham.N * self.ham.dim : 2 * self.ham.N * self.ham.dim].copy()
-        shift_complex = jax.numpy.reshape(shift_complex, (self.ham.dim, self.ham.N)).T
+
+        shift_complex = x[index_shift_real : index_shift_complex].copy()
+        shift_complex = jax.numpy.reshape(shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows))
         shift_complex = shift_complex.astype(np.float64)
 
-        c0a_real = x[2 * self.ham.N * self.ham.dim : (self.sys.nup + 2 * self.ham.dim) * self.ham.N].copy()
+        c0a_real = x[index_shift_complex : index_c0a_real].copy()
         c0a_real = jax.numpy.reshape(c0a_real, (self.sys.nup, self.ham.N)).T
         c0a_real = c0a_real.astype(np.float64)
 
         if self.sys.ndown > 0:
-            c0b_real = x[
-                (self.sys.nup + 2 * self.ham.dim)
-                * self.ham.N : (self.sys.nup + 2 * self.ham.dim + self.sys.ndown)
-                * self.ham.N
-            ].copy()
+            index_c0b_real = index_c0a_real + self.sys.ndown * self.ham.N
+            index_c0a_complex = index_c0b_real + self.sys.nup * self.ham.N
+
+            c0b_real = x[index_c0a_real : index_c0b_real].copy()
             c0b_real = jax.numpy.reshape(c0b_real, (self.sys.ndown, self.ham.N)).T
             c0b_real = c0b_real.astype(np.float64)
 
-            c0a_complex = x[
-                (self.sys.nup + 2 * self.ham.dim + self.sys.ndown)
-                * self.ham.N : (2 * self.sys.nup + 2 * self.ham.dim + self.sys.ndown)
-                * self.ham.N
-            ].copy()
+            c0a_complex = x[index_c0b_real : index_c0a_complex].copy()
             c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
-            c0b_complex = x[(2 * self.sys.nup + 2 * self.ham.dim + self.sys.ndown) * self.ham.N :].copy()
+            c0b_complex = x[index_c0a_complex:].copy()
             c0b_complex = jax.numpy.reshape(c0b_complex, (self.sys.ndown, self.ham.N)).T
             c0b_complex = c0b_complex.astype(np.float64)
 
         else:
-            c0a_complex = x[
-                (self.sys.nup + 2 * self.ham.dim) * self.ham.N : 2 * (self.sys.nup + self.ham.dim) * self.ham.N
-            ].copy()
+
+            c0a_complex = x[index_c0a_real : ].copy()
             c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
@@ -154,24 +162,30 @@ class Variational(metaclass=ABCMeta):
         return shift, c0a, c0b
 
     def pack_x_real(self) -> np.ndarray:
-        x = np.zeros((self.sys.nup + self.sys.ndown + self.ham.dim) * self.ham.N)
-        x[: self.ham.N * self.ham.dim] = self.shift.copy()
-        x[self.ham.N * self.ham.dim :] = self.psi.copy()
+        nparams = (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+        index_shift_real = self.ham.N * self.ham.dim
+
+        x = np.zeros(nparms)
+        x[: index_shift_real] = self.shift.copy()
+        x[index_shift_real :] = self.psi.copy()
         return x
 
     def unpack_x_real(self, x: np.ndarray) -> Tuple:
         """Extracts shift and Slater determinants from x array, which is passed to
         the objective function."""
-        shift = x[0 : self.ham.N * self.ham.dim].copy()
-        shift = jax.numpy.reshape(shift, (self.ham.dim, self.ham.N)).T
+        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_c0a_real = index_shift_real + self.ham.N * self.sys.nup
+
+        shift = x[ : index_shift_real].copy()
+        shift = jax.numpy.reshape(shift, (self.ham.dim, self.ham.N, self.shift_params_rows))
         shift = shift.astype(np.float64)
 
-        c0a = x[self.ham.N * self.ham.dim : (self.sys.nup + self.ham.dim) * self.ham.N].copy()
+        c0a = x[index_shift_real : index_c0a_real].copy()
         c0a = jax.numpy.reshape(c0a, (self.sys.nup, self.ham.N)).T
         c0a = c0a.astype(np.float64)
 
         if self.sys.ndown > 0:
-            c0b = x[(self.sys.nup + self.ham.dim) * self.ham.N :].copy()
+            c0b = x[index_c0a_real :].copy()
             c0b = jax.numpy.reshape(c0b, (self.sys.ndown, self.ham.N)).T
             c0b = c0b.astype(np.float64)
         else:

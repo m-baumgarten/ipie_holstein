@@ -54,6 +54,7 @@ class CoherentStateVariational(Variational):
 
     @plum.dispatch
     def variational_energy(self, ham: HolsteinModel, G: list, shift):
+        shift = npj.squeeze(shift)
         kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         rho = G[0].diagonal() + G[1].diagonal()
         el_ph_contrib = -self.ham.g * np.sum(rho * 2 * shift.T.real)
