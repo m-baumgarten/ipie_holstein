@@ -12,13 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Union
 from abc import ABCMeta, abstractmethod
+import numpy as np
 
 class GenericEPhModel(metaclass=ABCMeta):
-    def __init__(self, nsites: int, pbc: bool):
-        self.nsites = nsites
-        self.pbc = pbc
     
+    #def __init__(self, nsites: int, pbc: bool):
+    #    self.nsites = nsites
+    #    self.pbc = pbc
+    
+    def __init__(self, nsites: Union[np.ndarray, int], pbc: bool):    
+        if isinstance(nsites, np.ndarray):
+            assert len(nsites.shape) == 1
+            assert len(nsites) < 3
+            self.dim = len(nsites)
+        else:
+            self.dim = 1
+            nsites = np.array([nsites])
+        self.nsites = nsites
+        self.N = np.prod(nsites)
+        self.pbc = pbc
+
     @abstractmethod
     def build(self): ...
 

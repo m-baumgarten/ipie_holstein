@@ -23,22 +23,39 @@ class BondSSHModel(HolsteinModel):
     """
     def build_g(self) -> numpy.ndarray:
         """"""
-        g_tensor = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
-        for site in range(self.nsites):
-            g_tensor[(site+1) % self.nsites, site, site] = 1.
-            g_tensor[site, (site+1) % self.nsites, site] = 1.
+        g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
+        for site in range(self.N):
+            g_tensor[(site+1) % self.N, site, site] = 1.
+            g_tensor[site, (site+1) % self.N, site] = 1.
         g_tensor *= -self.g
         return g_tensor
 
-class AcousticSSHModel(HolsteinModel):
+class OpticalSSHModel(HolsteinModel):
     def build_g(self) -> numpy.ndarray:
         """"""
-        g_tensor = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
-        for site in range(self.nsites):
-            g_tensor[(site+1) % self.nsites, site, site] = -1
-            g_tensor[site, (site+1) % self.nsites, site] = -1
-            g_tensor[(site+1) % self.nsites, site, (site+1) % self.nsites] = 1.
-            g_tensor[site, (site+1) % self.nsites, (site+1) % self.nsites] = 1.
+        g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
+        for site in range(self.N):
+            g_tensor[(site+1) % self.N, site, site] = -1
+            g_tensor[site, (site+1) % self.N, site] = -1
+            g_tensor[(site+1) % self.N, site, (site+1) % self.N] = 1.
+            g_tensor[site, (site+1) % self.N, (site+1) % self.N] = 1.
         g_tensor *= -self.g
         return g_tensor
 
+class DualCouplingModel(HolsteinModel):
+    r"""Benchmarked with MA and DiagMC by Berciu in https://link.aps.org/doi/10.1103/PhysRevB.95.035117"""
+    def __init__(self, g: float, g_ssh: float, t: float, w0: float, nsites: int, pbc: bool):
+        super().__init__(g, t, w0, nsites, pbc)
+        self.g_ssh = g_ssh
+
+    def build_g(self) -> numpy.ndarray:
+        """"""
+        g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
+        for site in range(self.N):
+            g_tensor[site, site, site] = self.g
+            g_tensor[(site+1) % self.N, site, site] = -1
+            g_tensor[site, (site+1) % self.N, site] = -1
+            g_tensor[(site+1) % self.N, site, (site+1) % self.N] = 1.
+            g_tensor[site, (site+1) % self.N, (site+1) % self.N] = 1.
+        g_tensor *= self.g_ssh
+        return g_tensor
