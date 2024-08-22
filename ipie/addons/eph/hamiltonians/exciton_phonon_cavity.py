@@ -52,9 +52,9 @@ class ExcitonPhononCavityElectron(HolsteinModel):
 
     def build_quadratic(self) -> Sequence[numpy.array]:
         """"""
-        quad = numpy.diag(numpy.ones(self.nsites - 2), 2)
-        quad += numpy.diag(numpy.ones(self.nsites - 2), -2)
-        quad -= 2 * numpy.eye(self.nsites)
+        quad = numpy.diag(numpy.ones(self.N - 2), 2)
+        quad += numpy.diag(numpy.ones(self.N - 2), -2)
+        quad -= 2 * numpy.eye(self.N)
 
         if self.pbc:
             quad[0, -2] = quad[-2, 0] = 1.0
@@ -67,20 +67,20 @@ class ExcitonPhononCavityElectron(HolsteinModel):
 
     def build_g(self) -> numpy.ndarray:
         """"""
-        g_tensor = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
-        for site in range(self.nsites):
+        g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
+        for site in range(self.N):
             g_tensor[site, site, site] = (1 - self.c)
-            g_tensor[site, site, (site+1) % self.nsites] = - 0.5 * self.c
-            g_tensor[site, site, (site-1) % self.nsites] = - 0.5 * self.c
+            g_tensor[site, site, (site+1) % self.N] = - 0.5 * self.c
+            g_tensor[site, site, (site-1) % self.N] = - 0.5 * self.c
             
-            g_tensor[site, (site+2) % self.nsites, site] = 0.25 * self.c
-            g_tensor[(site+2) % self.nsites, site, site] = 0.25 * self.c
-            g_tensor[site, (site+2) % self.nsites, (site+2) % self.nsites] = 0.25 * self.c
-            g_tensor[(site+2) % self.nsites, site, (site+2) % self.nsites] = 0.25 * self.c
-            g_tensor[site, (site+2) % self.nsites, (site+1) % self.nsites] = 0.5 * self.c
-            g_tensor[(site+2) % self.nsites, site, (site+1) % self.nsites] = 0.5 * self.c
+            g_tensor[site, (site+2) % self.N, site] = 0.25 * self.c
+            g_tensor[(site+2) % self.N, site, site] = 0.25 * self.c
+            g_tensor[site, (site+2) % self.N, (site+2) % self.N] = 0.25 * self.c
+            g_tensor[(site+2) % self.N, site, (site+2) % self.N] = 0.25 * self.c
+            g_tensor[site, (site+2) % self.N, (site+1) % self.N] = 0.5 * self.c
+            g_tensor[(site+2) % self.N, site, (site+1) % self.N] = 0.5 * self.c
         
-        g_tensor *= self.ge * self.Xconst
+        g_tensor *= self.ge # * self.Xconst
         return g_tensor
 
 class ExcitonPhononCavityHole(ExcitonPhononCavityElectron):

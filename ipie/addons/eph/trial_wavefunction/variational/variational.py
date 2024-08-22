@@ -60,6 +60,8 @@ class Variational(metaclass=ABCMeta):
     def gradient(self, x, *args) -> np.ndarray:
         """"""
         grad = np.array(jax.grad(self.objective_function)(x, *args), dtype=np.float64)
+        print('jax grad:    ', grad)
+        exit()
         return grad
 
     def run(self) -> np.ndarray:
@@ -95,7 +97,12 @@ class Variational(metaclass=ABCMeta):
 
         return etrial, beta_shift, psi
 
-    def pack_x_complex(self) -> np.ndarray:
+    def pack_x_complex(self, shift: np.ndarray=None, psi: np.ndarray=None) -> np.ndarray:
+        if shift is None:
+            shift = self.shift
+        if psi is None:
+            psi = self.psi
+
         nparams = 2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
         index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
         index_shift_complex = 2 * index_shift_real
@@ -103,12 +110,12 @@ class Variational(metaclass=ABCMeta):
         index_psi_complex = index_psi_real + (self.sys.ndown + self.sys.nup) * self.ham.N
 
         x = np.zeros(nparams)
-        x[: index_shift_real] = self.shift.real
-        x[index_shift_real : index_shift_complex] = self.shift.imag
+        x[: index_shift_real] = shift.real
+        x[index_shift_real : index_shift_complex] = shift.imag
         x[index_shift_complex : index_psi_real] = (
-            self.psi.real
+            psi.real
         )
-        x[index_psi_real : index_psi_complex] = self.psi.imag
+        x[index_psi_real : index_psi_complex] = psi.imag
         return x
 
     def unpack_x_complex(self, x: np.ndarray) -> Tuple:

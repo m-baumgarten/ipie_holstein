@@ -123,21 +123,6 @@ def overlap_degeneracy(hamiltonian, index):
 
     return degeneracy
 
-#def circ_perm(lst: np.ndarray) -> np.ndarray:
-#    """Returns a matrix which rows consist of all possible
-#    cyclic permutations given an initial array lst.
-#
-#    Parameters
-#    ----------
-#    lst :
-#        Initial array which is to be cyclically permuted
-#    """
-#    circs = lst
-#    for shift in range(1, len(lst)):
-#        new_circ = np.roll(lst, -shift)
-#        circs = np.vstack([circs, new_circ])
-#    return circs
-
 
 class ToyozawaVariational(Variational):
     def __init__(
@@ -163,6 +148,10 @@ class ToyozawaVariational(Variational):
         self.perms, kcoeff = circ_perm(hamiltonian, self.K)
         self.nperms = self.perms.shape[0]
         self.Kcoeffs = get_kcoeffs(hamiltonian, self.K)
+        
+#        self.perms = [self.perms[0]]
+#        self.nperms = 1
+#        self.Kcoeffs = np.array([1.])
         assert np.all(kcoeff == self.Kcoeffs)
 
     def get_args(self):
@@ -194,10 +183,6 @@ class ToyozawaVariational(Variational):
             if npj.abs(overlap) < zero_th:
                 continue
 
-#            if ip != 0:
-#                overlap = overlap * (self.ham.nsites - ip) * 2
-#            else:
-#                overlap = overlap * self.ham.nsites
             overlap *= overlap_degeneracy(self.ham, ip)
 
             # Evaluate Greens functions
@@ -212,9 +197,128 @@ class ToyozawaVariational(Variational):
             projected_energy = self.projected_energy(self.ham, G_j, shift, beta_i)
             num_energy += (projected_energy * overlap).real
             denom += overlap.real
-        
+            
+#            print(f'energy I {ip}:    ', (projected_energy * overlap).real, overlap.real)
+
+#        print('energ I:  ', num_energy, denom)
         energy = num_energy / denom
         return energy.real
+
+    def d_xAx_d_x(self, A, x):
+        return (A + A.conj().T).dot(x)
+
+    def _gradient(self, x, *args) -> np.ndarray:
+        """For GenericEPhModel"""
+        shift, c0a, c0b = self.unpack_x(x)
+        shift = np.squeeze(shift)
+        c0a = np.squeeze(c0a)
+        shift_abs = np.abs(shift)
+
+        
+        shift_grad_real = np.zeros_like(shift)
+        shift_grad_imag = np.zeros_like(shift)
+        psia_grad_real = np.zeros_like(c0a)
+        psia_grad_imag = np.zeros_like(c0a)
+     
+        shift_grad_real_ovlp = np.zeros_like(shift)
+        shift_grad_imag_ovlp = np.zeros_like(shift)
+        psia_grad_real_ovlp = np.zeros_like(c0a)
+        psia_grad_imag_ovlp = np.zeros_like(c0a)
+
+        #TODO get total energy and overlap
+        ovlp = 0.
+        energy = 0.
+
+        for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
+            fac_i = overlap_degeneracy(self.ham, ip) * self.Kcoeffs[0].conj() * coeffi
+            
+            beta_i = shift[permi]
+            psia_i = c0a[permi] # [permi, :]
+            
+            perm_mat = np.roll(np.eye(self.ham.N), shift=-ip, axis=0)
+            perm_mat_symm = perm_mat + perm_mat.conj().T
+            perm_mat_asym = perm_mat - perm_mat.conj().T
+
+            Ga_i = np.outer(c0a.conj(), psia_i)
+            occ = np.sum(Ga_i.diagonal())
+            
+            kin = np.sum(Ga_i * self.ham.T[0])
+            kin_perm = self.ham.T[0].dot(perm_mat)
+            el_ph_c = np.einsum('ijk,ij->k', self.ham.g_tensor, Ga_i)
+            el_ph_c_perm = np.einsum('k,km->m', el_ph_c, perm_mat)
+            
+            cs_ovlp = np.exp(np.dot(shift.conj(), beta_i) - np.sum(shift_abs**2)) #verify dot works here
+            ovlp_i = occ * cs_ovlp
+            tot_energy = (kin + el_ph_c.dot(shift.conj() + beta_i) + occ * shift.conj().dot(beta_i)) * cs_ovlp
+
+            d_cs_ovlp_r = cs_ovlp * (perm_mat_symm.dot(shift.real) + 1j * perm_mat_asym.dot(shift.imag) - 2 * shift.real)
+            d_cs_ovlp_i = cs_ovlp * (perm_mat_symm.dot(shift.imag) - 1j * perm_mat_asym.dot(shift.real) - 2 * shift.imag)
+            
+
+            # shift_grad_real contribs
+            kin_contrib = kin * d_cs_ovlp_r
+            el_ph_contrib = d_cs_ovlp_r * np.sum(el_ph_c * (shift.conj() + beta_i)) + cs_ovlp * (el_ph_c + el_ph_c_perm)
+            boson_contrib = d_cs_ovlp_r * np.sum(shift.conj() * beta_i) + cs_ovlp * (perm_mat_symm.dot(shift.real) + 1j * perm_mat_asym.dot(shift.imag))
+            boson_contrib *= occ * self.ham.w0
+            ovlp_contrib = d_cs_ovlp_r * occ
+            sgr = (kin_contrib + el_ph_contrib + boson_contrib)
+            sgr_ovlp = ovlp_contrib 
+
+            # shift_grad_imag contribs
+            kin_contrib = kin * d_cs_ovlp_i
+            el_ph_contrib = d_cs_ovlp_i * np.sum(el_ph_c * (shift.conj() + beta_i)) +  1j * cs_ovlp * (el_ph_c_perm - el_ph_c)
+            boson_contrib = d_cs_ovlp_i * np.sum(shift.conj() * beta_i) + cs_ovlp * (perm_mat_symm.dot(shift.imag) - 1j * perm_mat_asym.dot(shift.real))
+            boson_contrib *= occ * self.ham.w0
+            ovlp_contrib = d_cs_ovlp_i * occ
+            sgi = (kin_contrib + el_ph_contrib + boson_contrib)
+            sgi_ovlp = ovlp_contrib
+
+
+    # BUG HERE TODO, in both diffs wrt imag and real -> bug in cs_ovlp?
+
+            # psia_grad_real contribs
+            g_contracted = np.einsum('ijk,k->ij', self.ham.g_tensor, shift.conj() + beta_i).dot(perm_mat) # TODO FIX
+            
+            kin_contrib = cs_ovlp * ((kin_perm + kin_perm.conj().T).dot(c0a.real) + 1j * (kin_perm - kin_perm.conj().T).dot(c0a.imag))
+            el_ph_contrib = cs_ovlp * ((g_contracted + g_contracted.T).dot(c0a.real) + 1j * (g_contracted - g_contracted.T).dot(c0a.imag))
+            boson_contrib = self.ham.w0 * cs_ovlp * shift.conj().dot(beta_i) * (perm_mat_symm.dot(c0a.real) + 1j * perm_mat_asym.dot(c0a.imag))
+            ovlp_contrib = cs_ovlp * (perm_mat_symm.dot(c0a.real) + 1j * perm_mat_asym.dot(c0a.imag))
+            pgr = (kin_contrib + el_ph_contrib + boson_contrib)
+            pgr_ovlp = ovlp_contrib
+
+            # psia_grad_imag contribs
+            kin_contrib = cs_ovlp * ((kin_perm + kin_perm.conj().T).dot(c0a.imag) - 1j * (kin_perm - kin_perm.conj().T).dot(c0a.real))
+            el_ph_contrib = cs_ovlp * ((g_contracted + g_contracted.T).dot(c0a.imag) - 1j * (g_contracted - g_contracted.T).dot(c0a.real))
+            boson_contrib = self.ham.w0 * cs_ovlp * shift.conj().dot(beta_i) * (perm_mat_symm.dot(c0a.imag) - 1j * perm_mat_asym.dot(c0a.real))
+            ovlp_contrib = cs_ovlp * (perm_mat_symm.dot(c0a.imag) - 1j * perm_mat_asym.dot(c0a.real))
+            pgi = (kin_contrib + el_ph_contrib + boson_contrib)
+            pgi_ovlp = ovlp_contrib
+
+            # Accumulate
+            shift_grad_real += (fac_i * sgr).real
+            shift_grad_imag += (fac_i * sgi).real
+            psia_grad_real += (fac_i * pgr).real
+            psia_grad_imag += (fac_i * pgi).real
+            
+            shift_grad_real_ovlp += (fac_i * sgr_ovlp).real
+            shift_grad_imag_ovlp += (fac_i * sgi_ovlp).real
+            psia_grad_real_ovlp += (fac_i * pgr_ovlp).real
+            psia_grad_imag_ovlp += (fac_i * pgi_ovlp).real
+
+#            print(f'raw overlap {ip}: ', ovlp_i, cs_ovlp)
+            energy += (fac_i * cs_ovlp * (kin + np.sum(np.einsum('ijk,k->ij', self.ham.g_tensor, shift.conj() + beta_i) * Ga_i) + self.ham.w0 * occ * shift.conj().dot(beta_i))).real
+            ovlp += (fac_i * ovlp_i).real
+        
+#        print('energy:  ', energy, ovlp)
+
+        dx_energy = np.hstack([shift_grad_real, shift_grad_imag, psia_grad_real, psia_grad_imag]).astype(np.float64)        
+        dx_ovlp = np.hstack([shift_grad_real_ovlp, shift_grad_imag_ovlp, psia_grad_real_ovlp, psia_grad_imag_ovlp]).astype(np.float64)
+#        print('dx energy and ovlp', np.hstack([shift_grad_real, shift_grad_imag, psia_grad_real, psia_grad_imag]), np.hstack([shift_grad_real_ovlp, shift_grad_imag_ovlp, psia_grad_real_ovlp, psia_grad_imag_ovlp]))
+        dx = dx_energy / ovlp - dx_ovlp * energy / ovlp ** 2
+#        print('my grad: ', dx)
+#        exit()
+#        super().gradient(x)
+        return dx
 
     @plum.dispatch
     def projected_energy(self, ham: GenericEPhModel, G: list, shift, beta_i):

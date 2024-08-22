@@ -17,7 +17,7 @@ from typing import Tuple
 
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
-from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm
+from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm, circ_perm_1D
 from ipie.utils.backend import arraylib as xp
 from ipie.estimators.greens_function_single_det import gab_mod_ovlp
 
@@ -56,7 +56,7 @@ class ToyozawaTrial(CoherentStateTrial):
         verbose: bool = False,
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, verbose=verbose)
-        self.perms = circ_perm(np.arange(self.nbasis))
+        self.perms = circ_perm_1D(self.nbasis)
         self.nperms = self.perms.shape[0]
         self.kcoeffs = np.exp(1j * K * np.arange(self.nbasis))
         self.K = K

@@ -27,7 +27,7 @@ class BondSSHModel(HolsteinModel):
         for site in range(self.N):
             g_tensor[(site+1) % self.N, site, site] = 1.
             g_tensor[site, (site+1) % self.N, site] = 1.
-        g_tensor *= -self.g
+        g_tensor *= self.g
         return g_tensor
 
 class OpticalSSHModel(HolsteinModel):
@@ -39,7 +39,7 @@ class OpticalSSHModel(HolsteinModel):
             g_tensor[site, (site+1) % self.N, site] = -1
             g_tensor[(site+1) % self.N, site, (site+1) % self.N] = 1.
             g_tensor[site, (site+1) % self.N, (site+1) % self.N] = 1.
-        g_tensor *= -self.g
+        g_tensor *= self.g
         return g_tensor
 
 class DualCouplingModel(HolsteinModel):
