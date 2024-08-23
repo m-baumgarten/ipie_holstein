@@ -12,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import numpy as np
-import plum
+import time
+from abc import ABCMeta, abstractmethod
 from typing import Tuple
-from scipy.optimize import minimize, basinhopping
-from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
-from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
-from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+
 import jax
 import jax.numpy as npj
+import numpy as np
+import plum
+from line_profiler import LineProfiler
+from scipy.optimize import basinhopping, minimize
 
-from abc import abstractmethod, ABCMeta
+from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 
 
 class Variational(metaclass=ABCMeta):
@@ -40,7 +43,7 @@ class Variational(metaclass=ABCMeta):
         self.ham = hamiltonian
         self.sys = system
 
-        self.shift_params_rows = 1 # D2 and Toyozawa Ansatz
+        self.shift_params_rows = 1  # D2 and Toyozawa Ansatz
 
         if cplx:
             self.pack_x = self.pack_x_complex
@@ -60,14 +63,31 @@ class Variational(metaclass=ABCMeta):
     def gradient(self, x, *args) -> np.ndarray:
         """"""
         grad = np.array(jax.grad(self.objective_function)(x, *args), dtype=np.float64)
-        print('jax grad:    ', grad)
-        exit()
         return grad
 
     def run(self) -> np.ndarray:
 
         x = self.pack_x()
 
+        print("this is happening here")
+        lp = LineProfiler()
+        lp_wrapper = lp(self.gradient)
+        lp_wrapper(x)
+        lp.print_stats()
+
+        start = time.time()
+        ganalytic = self.gradient(x)
+        end = time.time()
+        print("analytic time = {}".format(end - start))
+        print("this is happening end")
+        start = time.time()
+        gjax = np.array(jax.grad(self.objective_function)(x), dtype=np.float64)
+        end = time.time()
+
+        print("jax time = {}".format(end - start))
+        diff = ganalytic - gjax
+        print("diff = {}".format(np.max(np.abs(diff))))
+        exit()
         res = minimize(
             self.objective_function,
             x,
@@ -97,25 +117,25 @@ class Variational(metaclass=ABCMeta):
 
         return etrial, beta_shift, psi
 
-    def pack_x_complex(self, shift: np.ndarray=None, psi: np.ndarray=None) -> np.ndarray:
+    def pack_x_complex(self, shift: np.ndarray = None, psi: np.ndarray = None) -> np.ndarray:
         if shift is None:
             shift = self.shift
         if psi is None:
             psi = self.psi
 
-        nparams = 2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+        nparams = (
+            2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+        )
         index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
         index_shift_complex = 2 * index_shift_real
         index_psi_real = index_shift_complex + (self.sys.ndown + self.sys.nup) * self.ham.N
         index_psi_complex = index_psi_real + (self.sys.ndown + self.sys.nup) * self.ham.N
 
         x = np.zeros(nparams)
-        x[: index_shift_real] = shift.real
-        x[index_shift_real : index_shift_complex] = shift.imag
-        x[index_shift_complex : index_psi_real] = (
-            psi.real
-        )
-        x[index_psi_real : index_psi_complex] = psi.imag
+        x[:index_shift_real] = shift.real
+        x[index_shift_real:index_shift_complex] = shift.imag
+        x[index_shift_complex:index_psi_real] = psi.real
+        x[index_psi_real:index_psi_complex] = psi.imag
         return x
 
     def unpack_x_complex(self, x: np.ndarray) -> Tuple:
@@ -126,15 +146,19 @@ class Variational(metaclass=ABCMeta):
         index_shift_complex = 2 * index_shift_real
         index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
 
-        shift_real = x[ : index_shift_real].copy()
-        shift_real = jax.numpy.reshape(shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows))
+        shift_real = x[:index_shift_real].copy()
+        shift_real = jax.numpy.reshape(
+            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+        )
         shift_real = shift_real.astype(np.float64)
 
-        shift_complex = x[index_shift_real : index_shift_complex].copy()
-        shift_complex = jax.numpy.reshape(shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows))
+        shift_complex = x[index_shift_real:index_shift_complex].copy()
+        shift_complex = jax.numpy.reshape(
+            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+        )
         shift_complex = shift_complex.astype(np.float64)
 
-        c0a_real = x[index_shift_complex : index_c0a_real].copy()
+        c0a_real = x[index_shift_complex:index_c0a_real].copy()
         c0a_real = jax.numpy.reshape(c0a_real, (self.sys.nup, self.ham.N)).T
         c0a_real = c0a_real.astype(np.float64)
 
@@ -142,11 +166,11 @@ class Variational(metaclass=ABCMeta):
             index_c0b_real = index_c0a_real + self.sys.ndown * self.ham.N
             index_c0a_complex = index_c0b_real + self.sys.nup * self.ham.N
 
-            c0b_real = x[index_c0a_real : index_c0b_real].copy()
+            c0b_real = x[index_c0a_real:index_c0b_real].copy()
             c0b_real = jax.numpy.reshape(c0b_real, (self.sys.ndown, self.ham.N)).T
             c0b_real = c0b_real.astype(np.float64)
 
-            c0a_complex = x[index_c0b_real : index_c0a_complex].copy()
+            c0a_complex = x[index_c0b_real:index_c0a_complex].copy()
             c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
@@ -156,7 +180,7 @@ class Variational(metaclass=ABCMeta):
 
         else:
 
-            c0a_complex = x[index_c0a_real : ].copy()
+            c0a_complex = x[index_c0a_real:].copy()
             c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
@@ -170,12 +194,14 @@ class Variational(metaclass=ABCMeta):
         return shift, c0a, c0b
 
     def pack_x_real(self) -> np.ndarray:
-        nparams = (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+        nparams = (
+            self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows
+        ) * self.ham.N
         index_shift_real = self.ham.N * self.ham.dim
 
         x = np.zeros(nparms)
-        x[: index_shift_real] = self.shift.copy()
-        x[index_shift_real :] = self.psi.copy()
+        x[:index_shift_real] = self.shift.copy()
+        x[index_shift_real:] = self.psi.copy()
         return x
 
     def unpack_x_real(self, x: np.ndarray) -> Tuple:
@@ -184,16 +210,16 @@ class Variational(metaclass=ABCMeta):
         index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
         index_c0a_real = index_shift_real + self.ham.N * self.sys.nup
 
-        shift = x[ : index_shift_real].copy()
+        shift = x[:index_shift_real].copy()
         shift = jax.numpy.reshape(shift, (self.ham.dim, self.ham.N, self.shift_params_rows))
         shift = shift.astype(np.float64)
 
-        c0a = x[index_shift_real : index_c0a_real].copy()
+        c0a = x[index_shift_real:index_c0a_real].copy()
         c0a = jax.numpy.reshape(c0a, (self.sys.nup, self.ham.N)).T
         c0a = c0a.astype(np.float64)
 
         if self.sys.ndown > 0:
-            c0b = x[index_c0a_real :].copy()
+            c0b = x[index_c0a_real:].copy()
             c0b = jax.numpy.reshape(c0b, (self.sys.ndown, self.ham.N)).T
             c0b = c0b.astype(np.float64)
         else:
@@ -204,10 +230,10 @@ class Variational(metaclass=ABCMeta):
     @plum.dispatch
     def initial_guess(self, ham: GenericEPhModel) -> None:
         _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
-        psia = elec_eigvecs_a[:, :self.sys.nup]
+        psia = elec_eigvecs_a[:, : self.sys.nup]
         if self.sys.ndown > 0:
             _, elec_eigvecs_a = np.linalg.eigh(ham.T[1])
-            psib = elec_eigvecs_a[:, :self.sys.ndown]
+            psib = elec_eigvecs_a[:, : self.sys.ndown]
             psi = np.column_stack([psia, psib])
         else:
             psi = psia
@@ -219,13 +245,14 @@ class Variational(metaclass=ABCMeta):
             Gb = np.zeros_like(Ga)
         G = [Ga, Gb]
 
-        shift = np.einsum('ijk,ij->k', ham.g_tensor, G[0] + G[1]) / self.ham.w0        
+        shift = np.einsum("ijk,ij->k", ham.g_tensor, G[0] + G[1]) / self.ham.w0
         self.psi = psi.T.ravel()
         self.shift = shift
 
+
 #    @plum.dispatch
 #    def initial_guess(self, ham: HolsteinModel):
-#        r"""Initial guess for the global optimization for the Holstein Model. 
+#        r"""Initial guess for the global optimization for the Holstein Model.
 #        We assume the shift to be real. Initial electronic degrees of freedom
 #        are obtained from diagonalizing the one-body electronic operator T."""
 #        _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
