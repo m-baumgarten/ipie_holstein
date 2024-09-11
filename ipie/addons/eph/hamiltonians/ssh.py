@@ -35,10 +35,12 @@ class OpticalSSHModel(HolsteinModel):
         """"""
         g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
         for site in range(self.N):
-            g_tensor[(site+1) % self.N, site, site] = -1
-            g_tensor[site, (site+1) % self.N, site] = -1
-            g_tensor[(site+1) % self.N, site, (site+1) % self.N] = 1.
-            g_tensor[site, (site+1) % self.N, (site+1) % self.N] = 1.
+            i = site
+            j = (site+1) % self.N
+            g_tensor[j, i, i] = -1
+            g_tensor[i, j, i] = -1
+            g_tensor[j, i, j] = 1.
+            g_tensor[i, j, j] = 1.
         g_tensor *= self.g
         return g_tensor
 

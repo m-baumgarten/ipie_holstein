@@ -18,11 +18,10 @@ from scipy.optimize import minimize, basinhopping
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.exciton_phonon_cavity import ExcitonPhononCavityElectron, ExcitonPhononCavityHole
-import jax
-import jax.numpy as npj
 import plum
 
 from ipie.addons.eph.trial_wavefunction.variational.variational import Variational
+from numba import jit
 
 def circ_perm_1D(sites: Union[int, np.ndarray]) -> np.ndarray:
     sites = np.arange(sites)
@@ -95,6 +94,7 @@ def get_kcoeffs(hamiltonian, K):
     Kcoeffs = np.exp(exponent)
     return Kcoeffs
 
+#@jit(nopython=True)
 def overlap_degeneracy(hamiltonian, index):
     if hamiltonian.dim == 1:
         if index != 0:
@@ -160,27 +160,27 @@ class ToyozawaVariational(Variational):
     def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
-        shift = npj.squeeze(shift)
-        shift_abs = npj.abs(shift)
+        shift = np.squeeze(shift)
+        shift_abs = np.abs(shift)
 
         num_energy = 0.0
         denom = 0.0
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
 
-            beta_i = shift[npj.array(permi)]
-            beta_i_abs = npj.abs(beta_i)
+            beta_i = shift[np.array(permi)]
+            beta_i_abs = np.abs(beta_i)
             psia_i = c0a[permi, :]
 
-            overlap = npj.linalg.det(c0a.conj().T.dot(psia_i)) * npj.prod(
-                npj.exp(-0.5 * (shift_abs**2 + beta_i_abs**2) + shift.conj() * beta_i)
+            overlap = np.linalg.det(c0a.conj().T.dot(psia_i)) * np.prod(
+                np.exp(-0.5 * (shift_abs**2 + beta_i_abs**2) + shift.conj() * beta_i)
             )
             if self.sys.ndown > 0:
                 psib_i = c0b[permi, :]
-                overlap *= npj.linalg.det(c0b.conj().T.dot(psib_i))
+                overlap *= np.linalg.det(c0b.conj().T.dot(psib_i))
             overlap *= self.Kcoeffs[0].conj() * coeffi
 
-            if npj.abs(overlap) < zero_th:
+            if np.abs(overlap) < zero_th:
                 continue
 
             overlap *= overlap_degeneracy(self.ham, ip)
@@ -190,7 +190,7 @@ class ToyozawaVariational(Variational):
             if self.sys.ndown > 0:
                 Gb_j = gab(c0b, psib_i)
             else:
-                Gb_j = npj.zeros_like(Ga_j)
+                Gb_j = np.zeros_like(Ga_j)
             G_j = [Ga_j, Gb_j]
 
             # Obtain projected energy of permuted soliton on original soliton
@@ -207,7 +207,7 @@ class ToyozawaVariational(Variational):
     def d_xAx_d_x(self, A, x):
         return (A + A.conj().T).dot(x)
 
-    def _gradient(self, x, *args) -> np.ndarray:
+    def gradient(self, x, *args) -> np.ndarray:
         """For GenericEPhModel"""
         shift, c0a, c0b = self.unpack_x(x)
         shift = np.squeeze(shift)
@@ -311,8 +311,8 @@ class ToyozawaVariational(Variational):
         
 #        print('energy:  ', energy, ovlp)
 
-        dx_energy = np.hstack([shift_grad_real, shift_grad_imag, psia_grad_real, psia_grad_imag]).astype(np.float64)        
-        dx_ovlp = np.hstack([shift_grad_real_ovlp, shift_grad_imag_ovlp, psia_grad_real_ovlp, psia_grad_imag_ovlp]).astype(np.float64)
+        dx_energy = np.hstack([shift_grad_real, shift_grad_imag, psia_grad_real, psia_grad_imag]).real.astype(np.float64)        
+        dx_ovlp = np.hstack([shift_grad_real_ovlp, shift_grad_imag_ovlp, psia_grad_real_ovlp, psia_grad_imag_ovlp]).real.astype(np.float64)
 #        print('dx energy and ovlp', np.hstack([shift_grad_real, shift_grad_imag, psia_grad_real, psia_grad_imag]), np.hstack([shift_grad_real_ovlp, shift_grad_imag_ovlp, psia_grad_real_ovlp, psia_grad_imag_ovlp]))
         dx = dx_energy / ovlp - dx_ovlp * energy / ovlp ** 2
 #        print('my grad: ', dx)
@@ -322,21 +322,21 @@ class ToyozawaVariational(Variational):
 
     @plum.dispatch
     def projected_energy(self, ham: GenericEPhModel, G: list, shift, beta_i):
-        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
-        el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
+        kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
+        el_ph_contrib = np.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
         if self.sys.ndown > 0:
-            el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
+            el_ph_contrib += np.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
+        phonon_contrib = ham.w0 * np.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
 
     @plum.dispatch
     def projected_energy(self, ham: Union[ExcitonPhononCavityElectron, ExcitonPhononCavityHole], G: list, shift, beta_i):
-        kinetic = npj.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
+        kinetic = np.sum(ham.T[0] * G[0] + ham.T[1] * G[1])
         ferm_ferm_contrib = np.sum(ham.quad[0] * G[0] + ham.quad[1] * G[1])
-        el_ph_contrib = npj.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
+        el_ph_contrib = np.einsum('ijk,ij,k->', ham.g_tensor, G[0], shift.conj() + beta_i)
         if self.sys.ndown > 0:
-            el_ph_contrib += npj.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
-        phonon_contrib = ham.w0 * jax.numpy.sum(shift.conj() * beta_i)
+            el_ph_contrib += np.einsum('ijk,ij,k->', ham.g_tensor, G[1], shift.conj() + beta_i)
+        phonon_contrib = ham.w0 * np.sum(shift.conj() * beta_i)
         local_energy = kinetic + el_ph_contrib + phonon_contrib + ferm_ferm_contrib
         return local_energy

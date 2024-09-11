@@ -16,8 +16,6 @@ import time
 from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
-import jax
-import jax.numpy as npj
 import numpy as np
 import plum
 from line_profiler import LineProfiler
@@ -27,6 +25,8 @@ from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.trial_wavefunction.variational.estimators import gab
 
+def print_fun(x, f, accepted):
+        print("at minimum %.4f accepted %d" % (f, int(accepted)))
 
 class Variational(metaclass=ABCMeta):
     def __init__(
@@ -52,6 +52,7 @@ class Variational(metaclass=ABCMeta):
             self.pack_x = self.pack_x_real
             self.unpack_x = self.unpack_x_real
 
+
     @abstractmethod
     def objective_function(self) -> float: ...
 
@@ -60,52 +61,72 @@ class Variational(metaclass=ABCMeta):
         """Sets args used by objective_funciton."""
         ...
 
-    def gradient(self, x, *args) -> np.ndarray:
-        """"""
-        grad = np.array(jax.grad(self.objective_function)(x, *args), dtype=np.float64)
-        return grad
-
-    def run(self) -> np.ndarray:
-
+    def gradient(self, x, *args) -> np.ndarray: ...
+        
+    def run(self) -> np.ndarray: 
         x = self.pack_x()
 
-        print("this is happening here")
-        lp = LineProfiler()
-        lp_wrapper = lp(self.gradient)
-        lp_wrapper(x)
-        lp.print_stats()
+#        print("this is happening here")
+#        lp = LineProfiler()
+#        lp_wrapper = lp(self.gradient)
+#        for _ in range(2):
+#            lp_wrapper(x)
+#            lp.print_stats()
+#
+#        start = time.time()
+#        ganalytic = self.gradient(x)
+#        end = time.time()
+#        print("analytic time = {}".format(end - start))
+#        print("this is happening end")
+#        exit()        
 
-        start = time.time()
-        ganalytic = self.gradient(x)
-        end = time.time()
-        print("analytic time = {}".format(end - start))
-        print("this is happening end")
-        start = time.time()
-        gjax = np.array(jax.grad(self.objective_function)(x), dtype=np.float64)
-        end = time.time()
+        if False:
+            from scipy.optimize import differential_evolution
+            bounds = [(-3,3)] * len(x)
+            res = differential_evolution(self.objective_function, bounds, polish=True,popsize=1000)
 
-        print("jax time = {}".format(end - start))
-        diff = ganalytic - gjax
-        print("diff = {}".format(np.max(np.abs(diff))))
-        exit()
-        res = minimize(
-            self.objective_function,
-            x,
-            args=self.get_args(),
-            jac=self.gradient,
-            tol=1e-10,
-            method="L-BFGS-B",
-            options={
-                "maxls": 20,
-                "gtol": 1e-10,
-                "eps": 1e-10,
-                "maxiter": 15000,
-                "ftol": 1.0e-10,
-                "maxcor": 1000,
-                "maxfun": 15000,
-                "disp": True,
-            },
-        )
+        if False:
+            minimizer_kwargs = { 
+                "method": "BFGS", 
+                "jac": self.gradient,
+                "args": self.get_args(),
+                "options": {
+                    "gtol": 1e-10,
+                    "eps": 1e-10,
+                    "maxiter": 1000,
+                    "disp": False,
+                },  
+            }  
+
+            res = basinhopping(
+                self.objective_function,
+                x,  
+                minimizer_kwargs=minimizer_kwargs,
+                callback=print_fun,
+                niter=1000,
+                niter_success=3,
+            )
+        
+        if True:
+#        else:
+            res = minimize(
+                self.objective_function,
+                x,
+                args=self.get_args(),
+                jac=self.gradient,
+                tol=1e-14,
+                method="L-BFGS-B",
+                options={
+                    "maxls": 20,
+                    "gtol": 1e-14,
+                    "eps": 1e-14,
+                    "maxiter": 15000,
+                    "ftol": 1.0e-14,
+                    "maxcor": 1000, #prev 1000
+                    "maxfun": 15000,
+                    "disp": True,
+                },
+            )
 
         etrial = res.fun
 
@@ -147,19 +168,19 @@ class Variational(metaclass=ABCMeta):
         index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
 
         shift_real = x[:index_shift_real].copy()
-        shift_real = jax.numpy.reshape(
+        shift_real = np.reshape(
             shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
         )
         shift_real = shift_real.astype(np.float64)
 
         shift_complex = x[index_shift_real:index_shift_complex].copy()
-        shift_complex = jax.numpy.reshape(
+        shift_complex = np.reshape(
             shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
         )
         shift_complex = shift_complex.astype(np.float64)
 
         c0a_real = x[index_shift_complex:index_c0a_real].copy()
-        c0a_real = jax.numpy.reshape(c0a_real, (self.sys.nup, self.ham.N)).T
+        c0a_real = np.reshape(c0a_real, (self.sys.nup, self.ham.N)).T
         c0a_real = c0a_real.astype(np.float64)
 
         if self.sys.ndown > 0:
@@ -167,25 +188,80 @@ class Variational(metaclass=ABCMeta):
             index_c0a_complex = index_c0b_real + self.sys.nup * self.ham.N
 
             c0b_real = x[index_c0a_real:index_c0b_real].copy()
-            c0b_real = jax.numpy.reshape(c0b_real, (self.sys.ndown, self.ham.N)).T
+            c0b_real = np.reshape(c0b_real, (self.sys.ndown, self.ham.N)).T
             c0b_real = c0b_real.astype(np.float64)
 
             c0a_complex = x[index_c0b_real:index_c0a_complex].copy()
-            c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
+            c0a_complex = np.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
             c0b_complex = x[index_c0a_complex:].copy()
-            c0b_complex = jax.numpy.reshape(c0b_complex, (self.sys.ndown, self.ham.N)).T
+            c0b_complex = np.reshape(c0b_complex, (self.sys.ndown, self.ham.N)).T
             c0b_complex = c0b_complex.astype(np.float64)
 
         else:
 
             c0a_complex = x[index_c0a_real:].copy()
-            c0a_complex = jax.numpy.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
+            c0a_complex = np.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
             c0a_complex = c0a_complex.astype(np.float64)
 
-            c0b_real = npj.zeros_like(c0a_real, dtype=np.float64)
-            c0b_complex = npj.zeros_like(c0a_complex, dtype=np.float64)
+            c0b_real = np.zeros_like(c0a_real, dtype=np.float64)
+            c0b_complex = np.zeros_like(c0a_complex, dtype=np.float64)
+
+        shift = shift_real + 1j * shift_complex
+        c0a = c0a_real + 1j * c0a_complex
+        c0b = c0b_real + 1j * c0b_complex
+
+        return shift, c0a, c0b
+    
+    def _unpack_x_complex(self, x: np.ndarray) -> Tuple:
+        """Extracts shift and Slater determinants from x array, which is passed to
+        the objective function."""
+        # Make these class attributes s.t. we only need to change these for defining D1 or D2 trial
+        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_complex = 2 * index_shift_real
+        index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
+
+        shift_real = x[:index_shift_real].copy()
+        shift_real = np.reshape(
+            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+        )
+        shift_real = shift_real.astype(np.float64)
+
+        shift_complex = x[index_shift_real:index_shift_complex].copy()
+        shift_complex = np.reshape(
+            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+        )
+        shift_complex = shift_complex.astype(np.float64)
+
+        c0a_real = x[index_shift_complex:index_c0a_real].copy()
+        c0a_real = np.reshape(c0a_real, (self.sys.nup, self.ham.N)).T
+        c0a_real = c0a_real.astype(np.float64)
+
+        if self.sys.ndown > 0:
+            index_c0b_real = index_c0a_real + self.sys.ndown * self.ham.N
+            index_c0a_complex = index_c0b_real + self.sys.nup * self.ham.N
+
+            c0b_real = x[index_c0a_real:index_c0b_real].copy()
+            c0b_real = np.reshape(c0b_real, (self.sys.ndown, self.ham.N)).T
+            c0b_real = c0b_real.astype(np.float64)
+
+            c0a_complex = x[index_c0b_real:index_c0a_complex].copy()
+            c0a_complex = np.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
+            c0a_complex = c0a_complex.astype(np.float64)
+
+            c0b_complex = x[index_c0a_complex:].copy()
+            c0b_complex = np.reshape(c0b_complex, (self.sys.ndown, self.ham.N)).T
+            c0b_complex = c0b_complex.astype(np.float64)
+
+        else:
+
+            c0a_complex = x[index_c0a_real:].copy()
+            c0a_complex = np.reshape(c0a_complex, (self.sys.nup, self.ham.N)).T
+            c0a_complex = c0a_complex.astype(np.float64)
+
+            c0b_real = np.zeros_like(c0a_real, dtype=np.float64)
+            c0b_complex = np.zeros_like(c0a_complex, dtype=np.float64)
 
         shift = shift_real + 1j * shift_complex
         c0a = c0a_real + 1j * c0a_complex
@@ -211,19 +287,19 @@ class Variational(metaclass=ABCMeta):
         index_c0a_real = index_shift_real + self.ham.N * self.sys.nup
 
         shift = x[:index_shift_real].copy()
-        shift = jax.numpy.reshape(shift, (self.ham.dim, self.ham.N, self.shift_params_rows))
+        shift = np.reshape(shift, (self.ham.dim, self.ham.N, self.shift_params_rows))
         shift = shift.astype(np.float64)
 
         c0a = x[index_shift_real:index_c0a_real].copy()
-        c0a = jax.numpy.reshape(c0a, (self.sys.nup, self.ham.N)).T
+        c0a = np.reshape(c0a, (self.sys.nup, self.ham.N)).T
         c0a = c0a.astype(np.float64)
 
         if self.sys.ndown > 0:
             c0b = x[index_c0a_real:].copy()
-            c0b = jax.numpy.reshape(c0b, (self.sys.ndown, self.ham.N)).T
+            c0b = np.reshape(c0b, (self.sys.ndown, self.ham.N)).T
             c0b = c0b.astype(np.float64)
         else:
-            c0b = npj.zeros_like(c0a, dtype=np.float64)
+            c0b = np.zeros_like(c0a, dtype=np.float64)
 
         return shift, c0a, c0b
 
