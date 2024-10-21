@@ -127,8 +127,8 @@ class Variational(metaclass=ABCMeta):
                     "disp": True,
                 },
             )
-
-        etrial = res.fun
+        
+            etrial = res.fun
 
         beta_shift, psia, psib = self.unpack_x(res.x)
         if self.sys.ndown > 0:
