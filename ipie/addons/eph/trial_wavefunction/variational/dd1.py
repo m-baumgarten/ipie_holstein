@@ -15,7 +15,7 @@
 from typing import List, Union
 
 import numpy as np
-import plum
+#import plum
 
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.exciton_phonon_cavity import ExcitonPhononCavityElectron
@@ -24,7 +24,7 @@ from ipie.addons.eph.trial_wavefunction.variational.toyozawa import (
     ToyozawaVariational,
 )
 
-from line_profiler import LineProfiler
+#from line_profiler import LineProfiler
 from ipie.addons.eph.hamiltonians.dispersive_phonons import DispersivePhononModel
 from numba import jit
 
@@ -49,11 +49,13 @@ def get_elph_tensors(g_tensor: np.ndarray, Ga_i: np.ndarray, shift: np.ndarray, 
 #    cs_ovlp *= cs_ovlp_norm
 #    return cs_ovlp
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def cs_overlap_jit(shift_i, shift_j) -> np.ndarray:
     cs_ovlp = shift_i.T.conj().dot(shift_j)
-    cs_ovlp_norm_i = -0.5 * npj.einsum("ij->j", npj.abs(shift_i) ** 2)
-    cs_ovlp_norm_j = -0.5 * npj.einsum("ij->j", npj.abs(shift_j) ** 2)
+#    cs_ovlp_norm_i = -0.5 * npj.einsum("ij->j", npj.abs(shift_i) ** 2)
+#    cs_ovlp_norm_j = -0.5 * npj.einsum("ij->j", npj.abs(shift_j) ** 2)
+    cs_ovlp_norm_i = -0.5 * np.sum(np.abs(shift_i) ** 2, axis=0)
+    cs_ovlp_norm_j = -0.5 * np.sum(np.abs(shift_j) ** 2, axis=0)
     cs_ovlp_norm = np.add.outer(cs_ovlp_norm_i, cs_ovlp_norm_j)
     cs_ovlp += cs_ovlp_norm
     cs_ovlp = np.exp(cs_ovlp)
@@ -67,9 +69,13 @@ def elph_contrib_shift(shift: np.ndarray, beta_i: np.ndarray, elph_contracted: n
     el_ph_contrib -= shift.real * (np.sum(elph_contracted, axis=1) + np.sum(elph_contracted ,axis=0)[perm_index])
     return el_ph_contrib
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def kin_contrib_shift(shift: np.ndarray, beta_i: np.ndarray, kin_tensor: np.ndarray, perm_index: np.ndarray):
     kin_contrib = beta_i.dot(kin_tensor.T)
+#    print("kin contrib: ", kin_contrib)
+#    print("kin tensor:  ", kin_tensor)
+#    print("shift:   ", beta_i)
+#    exit()
     kin_contrib += shift.conj().dot(kin_tensor)[perm_index,:][:,perm_index]
     kin_contrib -= shift.real * (np.sum(kin_tensor, axis=1) + np.sum(kin_tensor, axis=0)[perm_index])
     return kin_contrib
@@ -107,30 +113,55 @@ class dD1Variational(ToyozawaVariational):
     ):
         super().__init__(shift_init, electron_init, hamiltonian, system, K, cplx)
         self.shift_params_rows = self.ham.N
-    
+
+        self.grad_save = np.zeros((self.ham.N ** 2 + self.ham.N) * 2)
+        #print(self.psia, self.)
+#        K = 0.
+#        self.perms = np.array([self.perms[0]])
+#        self.nperms = 1
+#        self.Kcoeffs = np.array([self.Kcoeffs[0]])
+
     def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
-        shift = shift[0]
-        c0a = c0a[:,0]
-        
+#        if np.isnan(shift).any() or np.isnan(c0a).any():
+#            shift = np.load('/n/home01/mbaumgarten/Software/pyqcpbc/dd1_opt/16sites/nan_test/shift.npy') 
+#            c0a = np.load('/n/home01/mbaumgarten/Software/pyqcpbc/dd1_opt/16sites/nan_test/elec.npy')
+##            x = self.pack_x(shift, c0a)
+#            print('grad stuff man:  ', self.gradient_comps(self.x_man))
+#            print('grad:    ', self.gradient(self.x_man))
+#            print('hess:    ', self.hess_diag(self.x_man))
+#            print('seeing nans!')
+#            exit()
+#        self.x_man = x
+#        np.save('/n/home01/mbaumgarten/Software/pyqcpbc/dd1_opt/16sites/nan_test/shift.npy', shift)
+#        np.save('/n/home01/mbaumgarten/Software/pyqcpbc/dd1_opt/16sites/nan_test/elec.npy', c0a)
+#        print("shift:   ", shift.shape)
+#        shift = shift[0]
+        shift = np.squeeze(shift)
+#        c0a = c0a[:,0]
+        c0a = np.squeeze(c0a)
+
         num_energy = 0.0
         denom = 0.0
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
-            shift_i = np.roll(shift, shift=(-ip, -ip), axis=(0, 1))
+#            if ip % 2 != 0: continue
+            fac_i = self.m_phases[ip]
+            #shift_i = np.roll(shift, shift=(-ip, -ip), axis=(0, 1))
+            shift_i = shift[permi,:][:,permi]
             # Alternatively shift_j = shift[permj,:][:,permj]
             psia_i = c0a[permi]
 
             cs_ovlp = self.cs_overlap(shift, shift_i)
 
             overlap = np.sum(c0a.conj() * psia_i * cs_ovlp.diagonal())
-            overlap *= self.Kcoeffs[0].conj() * coeffi
+#            overlap *= self.Kcoeffs[0].conj() * coeffi
 
-            if np.abs(overlap) < zero_th:
-                continue
+#            if np.abs(overlap) < zero_th:
+#                continue
 
-            overlap *= overlap_degeneracy(self.ham, ip)
+#            overlap *= overlap_degeneracy(self.ham, ip)
 
             Ga_i = np.outer(c0a.conj(), psia_i)
             if self.sys.ndown > 0:
@@ -141,22 +172,30 @@ class dD1Variational(ToyozawaVariational):
 
             projected_energy = self.projected_energy(self.ham, G_i, shift, shift_i)
             num_energy += (
-                projected_energy
-                * overlap_degeneracy(self.ham, ip)
-                * self.Kcoeffs[0].conj()
-                * coeffi
+                projected_energy * fac_i
+ #               * overlap_degeneracy(self.ham, ip)
+ #               * self.Kcoeffs[0].conj()
+#                * coeffi
             ).real
-            denom += overlap.real
+            denom += (overlap * fac_i).real
             num = (
-                projected_energy
-                * overlap_degeneracy(self.ham, ip)
-                * self.Kcoeffs[0].conj()
-                * coeffi
+                projected_energy * fac_i
+#                * overlap_degeneracy(self.ham, ip)
+#                * self.Kcoeffs[0].conj()
+#                * coeffi
             ).real
         energy = num_energy / denom
+
+        ovlp_log = np.log(np.abs(denom))
+        ovlp_phase = np.angle(denom)
+        energy_log = np.log(np.abs(num_energy))
+        energy_phase = np.angle(num_energy)
+        first_contrib = np.exp(energy_log - ovlp_log) * np.exp(1j * (energy_phase - ovlp_phase))
+#        print("anal py energy, num, denom:  ", energy, num_energy, denom)
+#        print("log trick energy:    ", np.abs(first_contrib - energy))
         return energy.real
 
-    def _objective_function(self, x, zero_th: float = 1e-12) -> float:
+    def __objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
         shift = shift[0]
@@ -218,6 +257,9 @@ class dD1Variational(ToyozawaVariational):
         num_energy = 0.0
         denom = 0.0
 
+        ham = np.zeros((self.ham.N, self.ham.N), dtype=np.complex128)
+        ovl = np.zeros((self.ham.N, self.ham.N), dtype=np.complex128)
+
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
             shift_i = np.roll(shift, shift=(-ip, -ip), axis=(0, 1))
             # Alternatively shift_j = shift[permj,:][:,permj]
@@ -249,9 +291,20 @@ class dD1Variational(ToyozawaVariational):
                     * coeffi
                 )
                 denom += overlap
-                print(f'energy & ovlp {ip} {jp}', projected_energy, overlap)
-        print('num_energy:  ', num_energy)
-        print('denom:   ', denom)
+#                print(f'energy & ovlp {ip} {jp}', projected_energy, overlap)
+#        print('num_energy:  ', num_energy)
+#        print('denom:   ', denom)
+
+                ham[ip,jp] = projected_energy * coeffj.conj() * coeffi
+                ovl[ip,jp] = overlap
+#                jax.debug.print('energy & ovlp {x}', x = (ip, jp, projected_energy, overlap))
+
+        diff_hams = np.zeros(self.ham.N, dtype=np.float64)
+        diff_ovls = np.zeros(self.ham.N, dtype=np.float64)
+        for ip, permi in enumerate(self.perms):
+            diff_hams[ip] = (np.max(np.abs(ham - np.roll(ham, axis=(0,1), shift=(-ip,-ip)))))
+            diff_ovls[ip] = (np.max(np.abs(ovl - np.roll(ovl, axis=(0,1), shift=(-ip,-ip)))))
+        print('ham and ov:  ', diff_hams, diff_ovls)
 
         energy = num_energy / denom
         # TODO
@@ -265,7 +318,7 @@ class dD1Variational(ToyozawaVariational):
     def cs_overlap(self, shift_i, shift_j):
         return cs_overlap_jit(shift_i, shift_j)
 
-    @plum.dispatch
+#    @plum.dispatch
     def projected_energy(self, ham: GenericEPhModel, G: list, shift_i, shift_j):
  
         cs_ovlp = self.cs_overlap(shift_i, shift_j)
@@ -290,23 +343,23 @@ class dD1Variational(ToyozawaVariational):
         local_energy = kinetic + el_ph_contrib + phonon_contrib
         return local_energy
 
-    @plum.dispatch
-    def projected_energy(self, ham: DispersivePhononModel, G: list, shift_i, shift_j):
-        cs_ovlp = self.cs_overlap(shift_i, shift_j)
-        kinetic = np.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
+#    @plum.dispatch
+#    def projected_energy(self, ham: DispersivePhononModel, G: list, shift_i, shift_j):
+#        cs_ovlp = self.cs_overlap(shift_i, shift_j)
+#        kinetic = np.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
+#
+#        el_ph_contrib = np.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
+#        el_ph_contrib += np.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
+#        if self.sys.ndown > 0:
+#            el_ph_contrib = np.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
+#            el_ph_contrib += np.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
+#
+#        phonon_contrib = ham.w0 * np.einsum('ij,j->', shift_i.conj() * shift_j, cs_ovlp.diagonal() * G[0].diagonal())
+#        phonon_contrib += np.einsum('ij,in,jn,n->', ham.ph_tensor, shift_i.conj(), shift_j, G[0].diagonal() * cs_ovlp.diagonal())
+#        local_energy = kinetic + el_ph_contrib + phonon_contrib
+#        return local_energy
 
-        el_ph_contrib = np.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
-        el_ph_contrib += np.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
-        if self.sys.ndown > 0:
-            el_ph_contrib = np.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
-            el_ph_contrib += np.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
-
-        phonon_contrib = ham.w0 * np.einsum('ij,j->', shift_i.conj() * shift_j, cs_ovlp.diagonal() * G[0].diagonal())
-        phonon_contrib += np.einsum('ij,in,jn,n->', ham.ph_tensor, shift_i.conj(), shift_j, G[0].diagonal() * cs_ovlp.diagonal())
-        local_energy = kinetic + el_ph_contrib + phonon_contrib
-        return local_energy
-
-    @plum.dispatch
+#    @plum.dispatch
  #   def projected_energy(self, ham: ExcitonPhononCavityElectron, G: list, shift_i, shift_j):
  #       cs_ovlp = self.cs_overlap(shift_i, shift_j)
  #       kinetic = np.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
@@ -332,7 +385,7 @@ class dD1Variational(ToyozawaVariational):
 
 
     #@jit(nopython=True)
-    def gradient_comps(self, x, *args) -> np.ndarray:
+    def gradient_comps(self, x, *args):
         """For GenericEPhModel"""
         shift, c0a, c0b = self.unpack_x(x)
         shift = np.squeeze(shift)
@@ -353,17 +406,32 @@ class dD1Variational(ToyozawaVariational):
         energy = 0.0
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
-            perm_mat = np.roll(np.eye(self.ham.N), shift=-ip, axis=0)
-            fac_i = overlap_degeneracy(self.ham, ip) * self.Kcoeffs[0].conj() * coeffi
+#            if ip % 2 != 0: continue
+
+            #perm_mat = np.roll(np.eye(self.ham.N), shift=-ip, axis=0)
+            perm_mat = np.eye(self.ham.N)[permi, :]
+            fac_i = self.m_phases[ip] #overlap_degeneracy(self.ham, ip) * self.Kcoeffs[0].conj() * coeffi
             
-            perm_index = np.roll(np.arange(self.ham.N), shift=ip)
-            beta_i = np.roll(shift, shift=(-ip, -ip), axis=(0, 1))
+            #perm_index = permi #np.roll(np.arange(self.ham.N), shift=ip)
+            perm_mat_inv = np.linalg.inv(perm_mat)
+            perm_index = perm_mat_inv.dot(np.arange(self.ham.N)).astype(np.int32)
+
+#            print("permi:   ", permi)
+#            print("permi inv:   ", perm_index)
+#            print("action:  ", np.eye(self.ham.N)[permi, :][perm_index,:])
+
+
+#            beta_i = np.roll(shift, shift=(-ip, -ip), axis=(0, 1))
+            beta_i = shift[permi, :][:, permi]
             psia_i = c0a[permi]  # [permi, :]
 
             # TODO Could store these matrices
-            
+#            print("c0a: ", c0a) 
             Ga_i = np.outer(c0a.conj(), psia_i) # NOTE
             cs_ovlp = self.cs_overlap(shift, beta_i)
+#            print("Ga_i:    ", Ga_i)
+#            print("cs_ovlp: ", cs_ovlp)
+#            exit() 
 
             # Auxiliary Tensors
             kin_tensor = Ga_i * self.ham.T[0]
@@ -379,6 +447,8 @@ class dD1Variational(ToyozawaVariational):
 
             # shift_grad_real contribs
             # perm inverse
+#            print("kin cs ovlp: ", kin_csovlp)
+#            exit()
             Ga_shifts = Ga_i.diagonal() * cs_ovlp.diagonal()
             kin_contrib = kin_contrib_shift(shift, beta_i, kin_csovlp, perm_index)
 
@@ -392,6 +462,9 @@ class dD1Variational(ToyozawaVariational):
 
             sgr = kin_contrib + el_ph_contrib + boson_contrib
             sgr_ovlp = ovlp_contrib
+            
+#            print(f"{ip} kin contrib: ", kin_contrib)
+#            print(f"{ip} overlap contrib: ", ovlp_contrib)
 
             # shift_grad_imag contribs
             kin_contrib = kin_contrib_shift(-1j * shift, -1j * beta_i, kin_csovlp, perm_index)
@@ -411,6 +484,7 @@ class dD1Variational(ToyozawaVariational):
             kin_contrib = d_tensor_elec(c0a, kin_perm)
             el_ph_contrib = d_tensor_elec(c0a, g_contracted)
             boson_contrib = d_tensor_elec(c0a.conj(), w_contracted)
+#            print(f"{ip} w and g: ", el_ph_contrib, boson_contrib)
             ovlp_contrib = d_tensor_elec(c0a.conj(), ovlp_contracted)
 
             pgr = kin_contrib + el_ph_contrib + boson_contrib
@@ -430,6 +504,7 @@ class dD1Variational(ToyozawaVariational):
             shift_grad_imag += (fac_i * sgi).real
             psia_grad_real += (fac_i * pgr).real
             psia_grad_imag += (fac_i * pgi).real
+            
 
             shift_grad_real_ovlp += (fac_i * sgr_ovlp).real
             shift_grad_imag_ovlp += (fac_i * sgi_ovlp).real
@@ -444,6 +519,9 @@ class dD1Variational(ToyozawaVariational):
             energy += (fac_i * (kin + eph_energy + ph_energy)).real
             ovlp += (fac_i * ovlp_i).real
 
+        #print("shift_grad_real: ", shift_grad_real)
+
+        #exit()
         shift_grad = (shift_grad_real + 1j * shift_grad_imag).ravel()
         psia_grad = (psia_grad_real + 1j * psia_grad_imag).ravel()
         shift_grad_ovlp = (shift_grad_real_ovlp + 1j * shift_grad_imag_ovlp).ravel()
@@ -452,10 +530,40 @@ class dD1Variational(ToyozawaVariational):
         dx_energy = self.pack_x(shift_grad, psia_grad)
         dx_ovlp = self.pack_x(shift_grad_ovlp, psia_grad_ovlp)
 
-        dx = dx_energy / ovlp - dx_ovlp * energy / ovlp**2
-        return dx_energy, dx_ovlp, energy, ovlp 
-#        return dx
+        #dx = dx_energy / ovlp - dx_ovlp * energy / ovlp**2  TODO uncomment this
+#        ovlp_log = np.log(np.abs(ovlp))
+#        ovlp_phase = np.angle(ovlp)     
+#        energy_log = np.log(np.abs(energy))
+#        energy_phase = np.angle(energy)
+#        dxe_log = np.log(np.abs(dx_energy))
+#        dxe_phase = np.angle(dx_energy)
+#        dxo_log = np.log(np.abs(dx_ovlp))
+#        dxo_phase = np.angle(dx_ovlp)
+        
+#        first_contrib = np.exp(dxe_log - ovlp_log) * np.exp(1j * (dxe_phase - ovlp_phase))
+#        second_contrib = np.exp(dxo_log + energy_log - 2 * ovlp_log) * np.exp(1j * (dxo_phase + energy_phase - 2 * ovlp_phase))
 
+        return dx_energy, dx_ovlp, energy, ovlp 
+
+    def obj_func_kin(self, x, *args) -> float:
+        gijk = self.ham.g_tensor.copy()
+        wij = self.ham.w0.copy()
+        self.ham.g_tensor = np.zeros_like(self.ham.g_tensor)
+        self.ham.w0 = 0.
+        energy = self.objective_function(x)
+        self.ham.g_tensor = gijk
+        self.ham.w0 = wij
+        return energy
+
+    def grad_comps_kin(self, x, *args) -> np.ndarray:
+        gijk = self.ham.g_tensor.copy()
+        wij = self.ham.w0.copy()
+        self.ham.g_tensor = np.zeros_like(self.ham.g_tensor)
+        self.ham.w0 = 0.
+        dx_energy, _, _, _ = self.gradient_comps(x)
+        self.ham.g_tensor = gijk
+        self.ham.w0 = wij
+        return dx_energy
 
     def hess_diag(self, x, *args) -> np.ndarray:
         shift, c0a, c0b = self.unpack_x(x)
@@ -583,16 +691,45 @@ class dD1Variational(ToyozawaVariational):
 
         # Gather
         dx_energy, dx_ovlp, energy_grad, ovlp_grad = self.gradient_comps(x, *args)
+#        print('energies assert:    ', energy_grad, energy)
         assert np.allclose(energy_grad, energy)
+#        print("energy in hess py:   ", energy)
+#        print("ovlp in hess py: ", ovlp)
+
         assert np.allclose(ovlp_grad, ovlp)
+        
+        e = self.objective_function(x)
+        
         H = (d2x_energy / ovlp) - energy * d2x_ovlp / ovlp**2 - 2 * dx_ovlp * (dx_energy * ovlp - energy * dx_ovlp) / (ovlp**3)
+
+#        print("d2x energy in py:    ", d2x_energy)
 
         return H
 
 
     def gradient(self, x, *args) -> np.ndarray:
         dx_energy, dx_ovlp, energy, ovlp = self.gradient_comps(x, *args)
-        return dx_energy / ovlp - dx_ovlp * energy / ovlp**2
+        dx = dx_energy / ovlp - dx_ovlp * energy / ovlp**2
+
+#        ovlp_log = np.log(np.abs(ovlp))
+#        ovlp_phase = np.angle(ovlp)
+#        energy_log = np.log(np.abs(energy))
+#        energy_phase = np.angle(energy)
+#        dxe_log = np.log(np.abs(dx_energy))
+#        dxe_phase = np.angle(dx_energy)
+#        dxo_log = np.log(np.abs(dx_ovlp))
+#        dxo_phase = np.angle(dx_ovlp)
+
+#        first_contrib = np.exp(dxe_log - ovlp_log) * np.exp(1j * (dxe_phase - ovlp_phase))
+#        second_contrib = np.exp(dxo_log + energy_log - 2 * ovlp_log) * np.exp(1j * (dxo_phase + energy_phase - 2 * ovlp_phase))
+#        print("log trick:   ", np.max(np.abs(first_contrib - second_contrib - dx)))
+
+
+#        self.grad_save = np.vstack([self.grad_save, dx])
+#        np.save('/n/home01/mbaumgarten/toyozawa_arbitrary_unitcell/dd1_from_d1/tol_1e4/k_plus_normal_init/00/pure_k/jax/dx.npy', self.grad_save)
+
+        return dx
+
 
     def contract_ij_peij_r(self, tensor: np.ndarray, shift: np.ndarray, beta_i: np.ndarray, perm_mat: np.ndarray, cs_ovlp: np.ndarray, fac) -> np.ndarray:
         """Contracts indices ij without building 4 index object"""

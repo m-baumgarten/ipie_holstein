@@ -361,6 +361,12 @@ def pair_branch(walkers, comm, max_weight, min_weight, timer=PopControllerTimer(
             if glob_inf[s][0] < min_weight or glob_inf[e][0] > max_weight:
                 # sum of paired walker weights
                 wab = glob_inf[s][0] + glob_inf[e][0]
+                if wab == 0.0:
+                    glob_inf[s][1] = 0
+                    glob_inf[e][1] = 0
+                    s += 1
+                    e -= 1
+                    continue
                 r = numpy.random.rand()
                 if r < glob_inf[e][0] / wab:
                     # clone large weight walker

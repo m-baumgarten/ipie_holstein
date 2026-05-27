@@ -20,7 +20,10 @@ from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm
 from ipie.utils.backend import arraylib as xp
 from ipie.estimators.greens_function_single_det import gab_mod_ovlp
-from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
+from ipie.addons.eph.trial_wavefunction.toyozawa import (
+    ToyozawaTrial,
+    _normalise_by_nonzero_overlap,
+)
 
 class ToyozawaTrialCoherentState(ToyozawaTrial):  
     def __init__(
@@ -34,6 +37,7 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, K, verbose=verbose)
         self.beta_shift /= np.sqrt(2 / (self.m * self.w0))
+        self.coherent_state_convention = "normalized"
 
     def calc_energy(self, ham, zero_th=1e-12):
         r"""Computes the variational energy of the trial, i.e.
@@ -97,6 +101,8 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
             e_ph = ham.w0 * np.sum(beta0.conj() * beta_i)
             e_eph = np.einsum('ijk,ij,k->', ham.g_tensor, G_i[0], beta0.conj() + beta_i)
 #            if ip != 0:
+#            print('eeph:    ', e_eph)
+#            print('Gi calc_energ:   ', G_i[0])
             if self.ndown > 0:
                 e_eph += np.einsum('ijk,ij,k->', ham.g_tensor, G_i[1], beta0.conj() + beta_i)
 #            rho = ham.g_tensor * (G_i[0] + G_i[1])
@@ -110,6 +116,7 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         etrial = num_energy / denom
         etrial_ph = num_ph_energy / denom
         self.mf_eph = num_meanfield / denom
+#        print('etrial:', etrial)
         return etrial, etrial_ph
 
     def calc_phonon_overlap_perms(self, walkers: EPhCSWalkers) -> np.ndarray:
@@ -117,23 +124,24 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
        # print('ph_ovlp I: ', walkers.ph_ovlp[:1, :])
         for ip, perm in enumerate(self.perms):
             # Normalized CS
-            #ph_ov = np.exp(-0.5 * (np.abs(self.beta_shift[perm])**2 + np.abs(walkers.coherent_state_shift)**2 - 2*self.beta_shift[perm].conj() * walkers.coherent_state_shift))
+            ph_ov = np.exp(-0.5 * (np.abs(self.beta_shift[perm])**2 + np.abs(walkers.coherent_state_shift)**2 - 2*self.beta_shift[perm].conj() * walkers.coherent_state_shift))
+            
             # Unnormalized CS
-            ph_ov = np.exp(self.beta_shift[perm].conj() * walkers.coherent_state_shift)
+            #ph_ov = np.exp(self.beta_shift[perm].conj() * walkers.coherent_state_shift)
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
 
-       # print('ph_ovlp II: ', walkers.ph_ovlp[:1, :])
         return walkers.ph_ovlp
 
     def calc_phonon_displacement(self, walkers: EPhCSWalkers, ham) -> np.ndarray:
         r""""""
+        #TODO this gives wrong sign...
         displacement = np.zeros((walkers.nwalkers, self.nperms), dtype=xp.complex128)
         for ip, (Ga, Gb, perm) in enumerate(zip(walkers.Ga_perm.T, walkers.Gb_perm.T, self.perms)):
             displacement[:, ip] = np.einsum('ijk,jin,nk->n', ham.g_tensor, Ga, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
             if self.ndown > 0:
                 displacement[:, ip] += np.einsum('ijk,jin,nk->n', ham.g_tensor, Gb, self.beta_shift[perm].conj() + walkers.coherent_state_shift)
-        displacement = np.einsum("np,n->n", displacement, 1 / np.sum(walkers.ovlp_perm, axis=1)) 
-        return displacement 
+        overlap = np.sum(walkers.ovlp_perm, axis=1)
+        return _normalise_by_nonzero_overlap(np.sum(displacement, axis=1), overlap)
 
     def calc_harm_osc(self, walkers: EPhCSWalkers) -> np.ndarray:
         r""""""
@@ -141,6 +149,5 @@ class ToyozawaTrialCoherentState(ToyozawaTrial):
         for ip, (ovlp, perm) in enumerate(zip(walkers.ovlp_perm.T, self.perms)):
             harm_osc[:, ip] = ovlp * np.sum(self.beta_shift[perm].conj() * walkers.coherent_state_shift, axis=1)
         
-        harm_osc = np.einsum("np,n->n", harm_osc, 1 / np.sum(walkers.ovlp_perm, axis=1))         
-        
-        return harm_osc
+        overlap = np.sum(walkers.ovlp_perm, axis=1)
+        return _normalise_by_nonzero_overlap(np.sum(harm_osc, axis=1), overlap)

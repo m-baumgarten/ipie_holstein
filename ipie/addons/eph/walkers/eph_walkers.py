@@ -18,7 +18,8 @@ from ipie.config import config
 from ipie.utils.backend import arraylib as xp
 from ipie.utils.backend import cast_to_device, qr, qr_mode, synchronize
 from ipie.walkers.base_walkers import BaseWalkers
-
+from ipie.addons.eph.trial_wavefunction.dd1 import dD1Trial
+from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 
 class EPhWalkers(BaseWalkers):
     """Class tailored to el-ph models where keeping track of phonon overlaps is
@@ -50,6 +51,7 @@ class EPhWalkers(BaseWalkers):
         nbasis: int,
         nwalkers: int,
         verbose: bool = False,
+        nshift_cols: int = 1
     ):
 
         self.nup = nup
@@ -66,13 +68,13 @@ class EPhWalkers(BaseWalkers):
         self.phonon_disp = numpy.squeeze(self.phonon_disp)
 
         self.phia = xp.array(
-            [initial_walker[:, 1 : self.nup + 1].copy() for iw in range(self.nwalkers)],
+            [initial_walker[:, nshift_cols : self.nup + nshift_cols].copy() for iw in range(self.nwalkers)],
             dtype=xp.complex128,
         )
 
         self.phib = xp.array(
             [
-                initial_walker[:, self.nup + 1 : self.nup + self.ndown + 1].copy()
+                initial_walker[:, self.nup + nshift_cols : self.nup + self.ndown + nshift_cols].copy()
                 for iw in range(self.nwalkers)
             ],
             dtype=xp.complex128,
@@ -94,7 +96,11 @@ class EPhWalkers(BaseWalkers):
         """
         self.phonon_disp *= numpy.sqrt(2 / (trial.m * trial.w0)) # Makes this expected position instead of beta
 
-        if hasattr(trial, "nperms"):
+#        if hasattr(trial, "nperms"):
+        if isinstance(trial, dD1Trial):
+            shape = (self.nwalkers, self.nbasis, trial.nperms)
+            shape_G = (self.nwalkers, self.nbasis, self.nbasis, trial.nperms)
+        elif isinstance(trial, ToyozawaTrial):
             shape = (self.nwalkers, trial.nperms)
             shape_G = (self.nwalkers, self.nbasis, self.nbasis, trial.nperms)
         else:
@@ -104,14 +110,14 @@ class EPhWalkers(BaseWalkers):
         self.ph_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
         self.el_ovlp = numpy.zeros(shape, dtype=numpy.complex128)
         self.ovlp_perm = numpy.zeros(shape, dtype=numpy.complex128)
-
+        
         self.Ga_perm = numpy.zeros(shape_G, dtype=numpy.complex128)
         self.Gb_perm = numpy.zeros_like(self.Ga_perm)
 
         self.Ga = numpy.zeros((self.nwalkers, self.nbasis, self.nbasis), dtype=numpy.complex128)
         self.Gb = numpy.zeros_like(self.Ga)
 
-        self.buff_names += ["ovlp_perm"]
+        self.buff_names += ["ovlp_perm", "ph_ovlp"]
         self.buff_size = round(self.set_buff_size_single_walker() / float(self.nwalkers))
         self.walker_buffer = numpy.zeros(self.buff_size, dtype=numpy.complex128)
 

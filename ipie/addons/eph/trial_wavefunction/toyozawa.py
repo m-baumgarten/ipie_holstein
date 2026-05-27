@@ -15,11 +15,27 @@
 import numpy as np
 from typing import Tuple
 
-from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
+#from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 from ipie.addons.eph.trial_wavefunction.coherent_state import CoherentStateTrial
 from ipie.addons.eph.trial_wavefunction.variational.toyozawa import circ_perm, circ_perm_1D
 from ipie.utils.backend import arraylib as xp
 from ipie.estimators.greens_function_single_det import gab_mod_ovlp
+
+class EPhWalkers: ...
+
+
+def _normalise_by_nonzero_overlap(values: np.ndarray, overlap: np.ndarray) -> np.ndarray:
+    """Divide walker-wise data by overlap, leaving zero-overlap walkers finite."""
+    result = np.zeros_like(values)
+    mask = np.abs(overlap) > 0.0
+    if not np.any(mask):
+        return result
+    if values.ndim == 1:
+        result[mask] = values[mask] / overlap[mask]
+    else:
+        shape = (-1,) + (1,) * (values.ndim - 1)
+        result[mask] = values[mask] / overlap[mask].reshape(shape)
+    return result
 
 
 class ToyozawaTrial(CoherentStateTrial):
@@ -180,6 +196,7 @@ class ToyozawaTrial(CoherentStateTrial):
         """
         ovlp_perm = self.calc_overlap_perm(walkers)
         ovlp = np.sum(ovlp_perm, axis=1)
+#        print('tyoy ovlp:    ', ovlp[966])
         return ovlp
 
     def calc_phonon_overlap_perms(self, walkers: EPhWalkers) -> np.ndarray:
@@ -204,6 +221,8 @@ class ToyozawaTrial(CoherentStateTrial):
                 + 1j * self.beta_shift[perm].real * self.beta_shift[perm].imag
             )
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
+#        print('toyo ph ovlp: ', walkers.ph_ovlp[966,:])
+#        exit()
         return walkers.ph_ovlp
 
     def calc_phonon_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -231,16 +250,23 @@ class ToyozawaTrial(CoherentStateTrial):
         return ph_ovlp
 
     def calc_phonon_gradient(self, walkers: EPhWalkers) -> np.ndarray:
-        r"""Computes the phonon gradient,
+        r"""Computes the phonon drift,
 
         .. math::
-            \sum_\sigma \frac{\nabla_X \langle \phi(\sigma(\beta)) | X(\tau) \rangle}
-            {\rangle \phi(\sigma(\beta)) | X(\tau) \rangle}
-            = \sum_\sigma -m \omega \frac{(X(\tau) - \sigma(\beta)) * \langle\phi(\sigma(\beta))|X(\tau)\rangle}
-            {\sum_\simga \langle\phi(\sigma(\beta))|X(\tau)\rangle}.
+            D_l = \frac{\nabla_{X_l} \langle \Psi_T | \psi, X \rangle}
+                       {\langle \Psi_T | \psi, X \rangle}
+                = -m\omega \frac{\sum_\sigma o_\sigma\, (X_l - \sigma(\beta)_l)}
+                                 {\sum_\sigma o_\sigma},
 
-        This is only used when calculating the drift term for the importance
-        sampling DMC part of the algorithm.
+        where :math:`o_\sigma = e^{-iK\sigma}\,\langle T_\sigma\alpha | \psi\rangle\,
+        \langle\mathrm{coh}(T_\sigma\beta) | X\rangle` is the per-permutation
+        full-trial weight stored in `walkers.ovlp_perm`. Because the
+        electronic factor and K-projector phase don't depend on X, they
+        appear only through the per-permutation weighting, so this
+        formula correctly differentiates the *full* trial despite only
+        the phonon Gaussian being explicitly differentiated.
+
+        This drift is consumed by the importance-sampling DMC propagator.
 
         Parameters
         ----------
@@ -250,14 +276,23 @@ class ToyozawaTrial(CoherentStateTrial):
         Returns
         -------
         grad : :class:`np.ndarray`
-            Phonon gradient
+            Phonon drift, shape (nwalkers, nbasis).
         """
+        # Defensive: refresh walkers.ovlp_perm to be consistent with the
+        # current walkers.phia / phonon_disp. The propagator normally
+        # calls calc_overlap before this, but recomputing here is cheap
+        # and removes a footgun for direct callers.
+        self.calc_overlap_perm(walkers)
+
         grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
-            grad += np.einsum("ni,n->ni", (walkers.phonon_disp - self.beta_shift[perm].conj()), ovlp) # TODO conj correct?
+            grad += np.einsum(
+                "ni,n->ni",
+                (walkers.phonon_disp - self.beta_shift[perm].conj()),
+                ovlp,
+            )
         grad *= -self.m * self.w0
-        grad = np.einsum("ni,n->ni", grad, 1 / np.sum(walkers.ovlp_perm, axis=1))
-        return grad
+        return _normalise_by_nonzero_overlap(grad, np.sum(walkers.ovlp_perm, axis=1))
 
 #        grad = np.zeros_like(walkers.phonon_disp, dtype=np.complex128)
 #        ovlps = walkers.el_ovlp * np.abs(walkers.ph_ovlp)
@@ -289,13 +324,15 @@ class ToyozawaTrial(CoherentStateTrial):
         laplacian : :class:`np.ndarray`
             Phonon Laplacian
         """
+        # Defensive: refresh walkers.ovlp_perm. See calc_phonon_gradient.
+        self.calc_overlap_perm(walkers)
+
         laplacian = np.zeros(walkers.nwalkers, dtype=np.complex128)
         for ovlp, perm in zip(walkers.ovlp_perm.T, self.perms):
-            arg = (walkers.phonon_disp - self.beta_shift[perm].conj()) * self.m * self.w0 # TODO conj correct?
+            arg = (walkers.phonon_disp - self.beta_shift[perm].conj()) * self.m * self.w0
             arg2 = arg**2
             laplacian += (np.sum(arg2, axis=1) - self.nsites * self.m * self.w0) * ovlp
-        laplacian /= np.sum(walkers.ovlp_perm, axis=1)
-        return laplacian
+        return _normalise_by_nonzero_overlap(laplacian, np.sum(walkers.ovlp_perm, axis=1))
     
 #    def calc_phonon_laplacian_imp(self, walkers: EPhWalkers) -> np.ndarray:
 #        r"""Computes the phonon Laplacian, which weights coherent state laplacians
@@ -352,6 +389,9 @@ class ToyozawaTrial(CoherentStateTrial):
                 "mi,wmj->wij", self.psia[perm, :].conj(), walkers.phia, optimize=True
             )
             sign_a, log_ovlp_a = xp.linalg.slogdet(ovlp_a)
+            
+#            print(self.psia, walkers.phia[0])
+#            exit()
 
             if self.ndown > 0:
                 ovlp_b = xp.einsum(
@@ -365,6 +405,8 @@ class ToyozawaTrial(CoherentStateTrial):
             ot *= coeff.conj()
 
             walkers.el_ovlp[:, ip] = ot
+#        print('toyo el_ovlp: ', walkers.el_ovlp[966, :])
+#        exit()
         return walkers.el_ovlp
 
     def calc_electronic_overlap(self, walkers: EPhWalkers) -> np.ndarray:
@@ -403,9 +445,12 @@ class ToyozawaTrial(CoherentStateTrial):
         G : :class:`list`
             List of Greens functions for :math:`\alpha,\beta` spin spaces.
         """
+        # Defensive: refresh walkers.ovlp_perm. See calc_phonon_gradient.
+        self.calc_overlap_perm(walkers)
+
         Ga = np.zeros((walkers.nwalkers, self.nsites, self.nsites), dtype=np.complex128)
         Gb = np.zeros_like(Ga)
-        
+
         for ip, (ovlp, perm) in enumerate(zip(walkers.ovlp_perm.T, self.perms)):
             inv_Oa = xp.linalg.inv(
                 xp.einsum("nie,if->nef", walkers.phia, self.psia[perm, :].conj())
@@ -414,6 +459,8 @@ class ToyozawaTrial(CoherentStateTrial):
 #            Ga += xp.einsum("ie,nef,njf,n->nij", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
             walkers.Ga_perm[:,:,:,ip] = xp.einsum("ie,nef,njf,n->nji", self.psia[perm].conj(), inv_Oa, walkers.phia, ovlp)
             Ga += walkers.Ga_perm[:,:,:,ip]
+#            print('stuff:   ', self.psia.conj()[perm, :], walkers.phia[966], inv_Oa[966], ovlp[966])
+#            print(f'toyo Ga perm {ip}:  ', walkers.Ga_perm[966,:,:,ip], ovlp[966] * inv_Oa[966])
 
             if self.ndown > 0:
                 inv_Ob = xp.linalg.inv(
@@ -428,9 +475,15 @@ class ToyozawaTrial(CoherentStateTrial):
         
 #        print('Ga:  ', Ga, '\nGa_swap:  ', np.swapaxes(Ga, 1, 2))
 #        assert (np.allclose(Ga, np.swapaxes(Ga, 1, 2)))
-
-        Ga = np.einsum("nij,n->nij", Ga, 1 / np.sum(walkers.ovlp_perm, axis=1))
+#            print(Ga[0,0,0])
+#            exit()
+#        print('toyo ovlp in gf:  ', np.sum(walkers.ovlp_perm, axis=(1))[966])
+        overlap = np.sum(walkers.ovlp_perm, axis=1)
+        Ga = _normalise_by_nonzero_overlap(Ga, overlap)
+#        print('sum ovlp perm:   ', np.sum(walkers.ovlp_perm, axis=(1)))
         if self.ndown > 0:
-            Gb = np.einsum("nij,n->nij", Gb, 1 / np.sum(walkers.ovlp_perm, axis=1))
-        
+            Gb = _normalise_by_nonzero_overlap(Gb, overlap)
+#        print('toyo Ga:  ', Ga[966,:,:])        
+#        print('walker disp: ', walkers.phonon_disp[966]) 
+#        print('walker phia: ', walkers.phia[966])
         return [Ga, Gb]

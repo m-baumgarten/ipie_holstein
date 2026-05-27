@@ -17,8 +17,8 @@ from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
 import numpy as np
-import plum
-from line_profiler import LineProfiler
+#import plum
+#from line_profiler import LineProfiler
 from scipy.optimize import basinhopping, minimize
 
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
@@ -145,37 +145,41 @@ class Variational(metaclass=ABCMeta):
             psi = self.psi
 
         nparams = (
-            2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+#            2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+            2 * (self.sys.nup + self.sys.ndown + self.shift_params_rows) * self.ham.N
         )
-        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_real = self.ham.N * self.shift_params_rows # * self.ham.dim 
         index_shift_complex = 2 * index_shift_real
         index_psi_real = index_shift_complex + (self.sys.ndown + self.sys.nup) * self.ham.N
         index_psi_complex = index_psi_real + (self.sys.ndown + self.sys.nup) * self.ham.N
 
         x = np.zeros(nparams)
-        x[:index_shift_real] = shift.real
-        x[index_shift_real:index_shift_complex] = shift.imag
+        x[:index_shift_real] = shift.real #.ravel()
+        x[index_shift_real:index_shift_complex] = shift.imag #.ravel()
         x[index_shift_complex:index_psi_real] = psi.real
         x[index_psi_real:index_psi_complex] = psi.imag
+        
         return x
 
     def unpack_x_complex(self, x: np.ndarray) -> Tuple:
         """Extracts shift and Slater determinants from x array, which is passed to
         the objective function."""
         # Make these class attributes s.t. we only need to change these for defining D1 or D2 trial
-        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_real = self.ham.N * self.shift_params_rows # * self.ham.dim
         index_shift_complex = 2 * index_shift_real
         index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
 
         shift_real = x[:index_shift_real].copy()
         shift_real = np.reshape(
-            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+#            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+            shift_real, (self.ham.N, self.shift_params_rows)
         )
         shift_real = shift_real.astype(np.float64)
 
         shift_complex = x[index_shift_real:index_shift_complex].copy()
         shift_complex = np.reshape(
-            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+#            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+            shift_complex, (self.ham.N, self.shift_params_rows)
         )
         shift_complex = shift_complex.astype(np.float64)
 
@@ -303,7 +307,7 @@ class Variational(metaclass=ABCMeta):
 
         return shift, c0a, c0b
 
-    @plum.dispatch
+#    @plum.dispatch
     def initial_guess(self, ham: GenericEPhModel) -> None:
         _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
         psia = elec_eigvecs_a[:, : self.sys.nup]

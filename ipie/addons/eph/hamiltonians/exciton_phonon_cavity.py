@@ -40,7 +40,7 @@ class ExcitonPhononCavityElectron(HolsteinModel):
         self.wtilde = wtilde
         self.je = je
         self.c = 0.5 * (g * je / wtilde) ** 2
-        self.quad_c = -self.c * 2 * wtilde
+        print('holstein c:   ', self.c)
 
         # TODO are these the correct constants?
         self.m = 1 / self.w0
@@ -49,6 +49,8 @@ class ExcitonPhononCavityElectron(HolsteinModel):
     def build(self) -> None:
         super().build()
         self.quad = self.build_quadratic()
+        self.T[0] += self.quad[0]
+        self.T[1] += self.quad[1]
 
     def build_quadratic(self) -> Sequence[numpy.array]:
         """"""
@@ -79,9 +81,110 @@ class ExcitonPhononCavityElectron(HolsteinModel):
             g_tensor[(site+2) % self.N, site, (site+2) % self.N] = 0.25 * self.c
             g_tensor[site, (site+2) % self.N, (site+1) % self.N] = 0.5 * self.c
             g_tensor[(site+2) % self.N, site, (site+1) % self.N] = 0.5 * self.c
-        
         g_tensor *= self.ge # * self.Xconst
+        
+#        gt2 = numpy.zeros_like(g_tensor)
+#        for site in range(self.N):
+#            gt2[site, site, site] += (1 - self.c)
+#            gt2[site, site, (site+1) % self.N] += - 0.5 * self.c
+#            gt2[site, site, (site-1) % self.N] += - 0.5 * self.c
+#
+#            gt2[site, (site+2) % self.N, site] += 0.25 * self.c
+#            gt2[(site+2) % self.N, site, site] += 0.25 * self.c
+#            gt2[site, (site+2) % self.N, (site+2) % self.N] += 0.25 * self.c
+#            gt2[(site+2) % self.N, site, (site+2) % self.N] += 0.25 * self.c
+#            gt2[site, (site+2) % self.N, (site+1) % self.N] += 0.5 * self.c
+#            gt2[(site+2) % self.N, site, (site+1) % self.N] += 0.5 * self.c
+#        gt2 *= self.ge # * self.Xconst
+#        print(numpy.max(gt2 - g_tensor))
+#        exit()
+#        print('final diff:  ', numpy.max(self.cavity_elph_ML(0,0) - g_tensor))
+#        exit()
         return g_tensor
+
+    def cavity_elph_ML(self, M: int, L: int) -> numpy.ndarray:
+        """"""
+        g_ml = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
+        for site in range(self.N):
+            g_ml[(site - L) % self.N, (site - L + M) % self.N, site] += 1 - self.c
+
+            g_ml[(site - L - 2) % self.N, (site - L + M) % self.N, site] += self.c / 4.
+            g_ml[(site - L + 2) % self.N, (site - L + M) % self.N, site] += self.c / 4.
+            g_ml[(site - L) % self.N, (site - L + M + 2) % self.N, site] += self.c / 4.
+            g_ml[(site - L) % self.N, (site - L + M - 2) % self.N, site] += self.c / 4.
+
+            g_ml[(site - L - 1) % self.N, (site - L + M - 1) % self.N, site] -= self.c / 2.
+            g_ml[(site - L + 1) % self.N, (site - L + M + 1) % self.N, site] -= self.c / 2.
+            g_ml[(site - L - 1) % self.N, (site - L + M + 1) % self.N, site] += self.c / 2.
+            g_ml[(site - L + 1) % self.N, (site - L + M - 1) % self.N, site] += self.c / 2.
+            
+#            if (site - L) % self.N != (site - L + M) % self.N:
+#                g_ml[(site - L + M) % self.N, (site - L) % self.N, site] += 1 - self.c
+#            if (site - L - 2) % self.N != (site - L + M) % self.N:
+#                g_ml[(site - L + M) % self.N, (site - L - 2) % self.N, site] += self.c / 4.
+#            if (site - L + 2) % self.N != (site - L + M) % self.N:
+#                g_ml[(site - L + M) % self.N, (site - L + 2) % self.N, site] += self.c / 4.
+#            if (site - L) % self.N != (site - L + M + 2) % self.N:
+#                g_ml[(site - L + M + 2) % self.N, (site - L) % self.N, site] += self.c / 4.
+#            if (site - L) % self.N != (site - L + M - 2) % self.N:
+#                g_ml[(site - L + M - 2) % self.N, (site - L) % self.N, site] += self.c / 4.
+#            if (site - L - 1) % self.N != (site - L + M - 1) % self.N:
+#                g_ml[(site - L + M - 1) % self.N, (site - L - 1) % self.N, site] -= self.c / 2.
+#            if (site - L + 1) % self.N != (site - L + M + 1) % self.N:
+#                g_ml[(site - L + M + 1) % self.N, (site - L + 1) % self.N, site] -= self.c / 2.
+#            if (site - L - 1) % self.N != (site - L + M + 1) % self.N:
+#                g_ml[(site - L + M + 1) % self.N, (site - L - 1) % self.N, site] += self.c / 2.
+#            if (site - L + 1) % self.N != (site - L + M - 1) % self.N:
+#                g_ml[(site - L + M - 1) % self.N, (site - L + 1) % self.N, site] += self.c / 2.
+    
+        
+        g_ml *= self.ge # * self.Xconst
+
+        gt2 = numpy.zeros_like(g_ml)
+        for site in range(self.N):
+            gt2[site, (site + M) % self.N, (site + L) % self.N] += 1 - self.c
+
+            gt2[site, (site + M + 2) % self.N, (site + L + 2) % self.N] += self.c / 4.
+            gt2[site, (site + M - 2) % self.N, (site + L - 2) % self.N] += self.c / 4.
+            gt2[site, (site + M + 2) % self.N, (site + L) % self.N] += self.c / 4.
+            gt2[site, (site + M - 2) % self.N, (site + L) % self.N] += self.c / 4.
+
+            gt2[site, (site + M) % self.N, (site + L - 1) % self.N] -= self.c / 2.
+            gt2[site, (site + M) % self.N, (site + L + 1) % self.N] -= self.c / 2.
+            gt2[site, (site + M + 2) % self.N, (site + L + 1) % self.N] += self.c / 2.
+            gt2[site, (site + M - 2) % self.N, (site + L - 1) % self.N] += self.c / 2.
+
+        gt2 *= self.ge
+        print('gt2:     ', gt2)
+        print('g_tens:  ', g_ml)
+        print('diff:    ', numpy.max(gt2 - g_ml))
+#        exit()
+        return g_ml
+
+class ExcitonPhononCavityElectronSSH(ExcitonPhononCavityElectron):
+    def __init__(
+        self,
+        g: float,
+        ge: float,
+        te: float,
+        w0: float,
+        wtilde: float,
+        je: float,
+        nsites: int,
+        pbc: bool,
+    ):
+        super().__init__(g=g, te=te, w0=w0, ge=ge, wtilde=wtilde, je=je, nsites=nsites, pbc=pbc)
+        assert pbc
+        self.c = 0.5 * (g * je / wtilde) ** 2
+
+        # TODO are these the correct constants?
+        self.m = 1 / self.w0
+        self.Xconst = numpy.sqrt(2.0 * self.m * self.w0)
+
+    def build_g(self) -> numpy.ndarray:
+        g_tensor = self.cavity_elph_ML(1,1) - self.cavity_elph_ML(-1,-1) - self.cavity_elph_ML(1,0) + self.cavity_elph_ML(-1,0)
+        return g_tensor
+
 
 class ExcitonPhononCavityHole(ExcitonPhononCavityElectron):
     def __init__(
@@ -155,6 +258,39 @@ class ExcitonPhononCavityElectronHole(ExcitonPhononCavityElectron):
             g_tensor_h[site, site, (site-1) % self.nsites] += - 0.5 * self.ch
             
             g_tensor_h[site, (site+2) % self.nsites, site] += 0.25 * self.ch
+        return Te, Th
+
+    def build_g(self) -> Sequence[numpy.ndarray]:
+        """"""
+        g_tensor_e = super().build_g()
+        
+        g_tensor_h = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
+        for site in range(self.nsites):
+            # should check whether we need += TODO
+            g_tensor_h[site, site, site] += (1 - self.ch)
+            g_tensor_h[site, site, (site+1) % self.nsites] += - 0.5 * self.ch
+            g_tensor_h[site, site, (site-1) % self.nsites] += - 0.5 * self.ch
+            
+            g_tensor_h[site, (site+2) % self.nsites, site] += 0.25 * self.ch
+    
+    def build_T(self) -> Sequence[numpy.ndarray]:
+        """Constructs electronic hopping matrix."""
+        Te = super().build_T()
+        Th = [Te[0].copy() * (self.th / self.te), Te[1].copy() * (self.th / self.te)]
+        return Te, Th
+
+    def build_g(self) -> Sequence[numpy.ndarray]:
+        """"""
+        g_tensor_e = super().build_g()
+        
+        g_tensor_h = numpy.zeros((self.nsites, self.nsites, self.nsites), dtype=numpy.complex128)
+        for site in range(self.nsites):
+            # should check whether we need += TODO
+            g_tensor_h[site, site, site] += (1 - self.ch)
+            g_tensor_h[site, site, (site+1) % self.nsites] += - 0.5 * self.ch
+            g_tensor_h[site, site, (site-1) % self.nsites] += - 0.5 * self.ch
+            
+            g_tensor_h[site, (site+2) % self.nsites, site] += 0.25 * self.ch
             g_tensor_h[(site+2) % self.nsites, site, site] += 0.25 * self.ch
             g_tensor_h[site, (site+2) % self.nsites, (site+2) % self.nsites] += 0.25 * self.ch
             g_tensor_h[(site+2) % self.nsites, site, (site+2) % self.nsites] += 0.25 * self.ch
@@ -177,52 +313,19 @@ class ExcitonPhononCavityElectronHole(ExcitonPhononCavityElectron):
             sp1_i = (site_i+1) % self.nsites
             sp2_i = (site_i+2) % self.nsites
             sm1_i = (site_i-1) % self.nsites
-            sm2_i = (site_i-2) % self.nsites
-            
+            elhole_tensor[site_i, site_i, site_j, sm2_j] -= -0.5 * self.ch * coulomb_site[site_i, sm1_j] 
 
-            for site_j in range(self.nsites):
-                sp1_j = (site_j+1) % self.nsites
-                sp2_j = (site_j+2) % self.nsites
-                sm1_j = (site_j-1) % self.nsites
-                sm2_j = (site_j-2) % self.nsites
-                    
-                
-                # Contribution from (I)
-                elhole_tensor[site_i, site_i, site_j, site_j] += coulomb_site[site_i, site_j]
-
-                # Contribution from (II)
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 1. * self.ce * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, sp2_i, site_j, site_j] -= -0.25 * self.ce * coulomb_site[site_i, sm2_j]
-                elhole_tensor[site_i, sm2_i, site_j, site_j] -= -0.25 * self.ce * coulomb_site[site_i, sp2_j]
-                elhole_tensor[site_i, sp2_i, site_j, site_j] -= -0.25 * self.ce * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, sm2_i, site_j, site_j] -= -0.25 * self.ce * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 0.5 * self.ce * coulomb_site[site_i, sm1_j]
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 0.5 * self.ce * coulomb_site[site_i, sp1_j]
-                elhole_tensor[site_i, sp2_i, site_j, site_j] -= -0.5 * self.ce * coulomb_site[site_i, sm1_j]
-                elhole_tensor[site_i, sm2_i, site_j, site_j] -= -0.5 * self.ce * coulomb_site[site_i, sp1_j]
-
-                # Contribution from (III)
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 1. * self.ch * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, site_i, site_j, sp2_j] -= -0.25 * self.ch * coulomb_site[site_i, sp2_j]
-                elhole_tensor[site_i, site_i, site_j, sm2_j] -= -0.25 * self.ch * coulomb_site[site_i, sm2_j]
-                elhole_tensor[site_i, site_i, site_j, sp2_j] -= -0.25 * self.ch * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, site_i, site_j, sm2_j] -= -0.25 * self.ch * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 0.5 * self.ch * coulomb_site[site_i, sm1_j]
-                elhole_tensor[site_i, site_i, site_j, site_j] -= 0.5 * self.ch * coulomb_site[site_i, sp1_j]
-                elhole_tensor[site_i, site_i, site_j, sp2_j] -= -0.5 * self.ch * coulomb_site[site_i, sp1_j]
-                elhole_tensor[site_i, site_i, site_j, sm2_j] -= -0.5 * self.ch * coulomb_site[site_i, sm1_j] 
-
-                # Contribution from (IV)
-                elhole_tensor[site_i, sp1_i, site_j, sm1_j] += 0.25 * self.ceh * coulomb_site[site_i, sm2_j]
-                elhole_tensor[site_i, sm1_i, site_j, sp1_j] += 0.25 * self.ceh * coulomb_site[site_i, sp2_j]
-                elhole_tensor[site_i, sp1_i, site_j, sm1_j] += 0.25 * self.ceh * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, sm1_i, site_j, sp1_j] += 0.25 * self.ceh * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, sp1_i, site_j, sp1_j] += -0.25 * self.ceh * coulomb_site[site_i, sp1_j]
-                elhole_tensor[site_i, sm1_i, site_j, sm2_j] += -0.25 * self.ceh * coulomb_site[site_i, sm1_j]
-                elhole_tensor[site_i, sp1_i, site_j, sp1_j] += -0.25 * self.ceh * coulomb_site[site_i, sm1_j]
-                elhole_tensor[site_i, sm1_i, site_j, sm1_j] += -0.25 * self.ceh * coulomb_site[site_i, sp1_j]
-                elhole_tensor[site_i, sp1_i, site_j, sm1_j] += -0.5 * self.ceh * coulomb_site[site_i, site_j]
-                elhole_tensor[site_i, sm1_i, site_j, sp1_j] += -0.5 * self.ceh * coulomb_site[site_i, site_j]
+            # Contribution from (IV)
+            elhole_tensor[site_i, sp1_i, site_j, sm1_j] += 0.25 * self.ceh * coulomb_site[site_i, sm2_j]
+            elhole_tensor[site_i, sm1_i, site_j, sp1_j] += 0.25 * self.ceh * coulomb_site[site_i, sp2_j]
+            elhole_tensor[site_i, sp1_i, site_j, sm1_j] += 0.25 * self.ceh * coulomb_site[site_i, site_j]
+            elhole_tensor[site_i, sm1_i, site_j, sp1_j] += 0.25 * self.ceh * coulomb_site[site_i, site_j]
+            elhole_tensor[site_i, sp1_i, site_j, sp1_j] += -0.25 * self.ceh * coulomb_site[site_i, sp1_j]
+            elhole_tensor[site_i, sm1_i, site_j, sm2_j] += -0.25 * self.ceh * coulomb_site[site_i, sm1_j]
+            elhole_tensor[site_i, sp1_i, site_j, sp1_j] += -0.25 * self.ceh * coulomb_site[site_i, sm1_j]
+            elhole_tensor[site_i, sm1_i, site_j, sm1_j] += -0.25 * self.ceh * coulomb_site[site_i, sp1_j]
+            elhole_tensor[site_i, sp1_i, site_j, sm1_j] += -0.5 * self.ceh * coulomb_site[site_i, site_j]
+            elhole_tensor[site_i, sm1_i, site_j, sp1_j] += -0.5 * self.ceh * coulomb_site[site_i, site_j]
 
         elhole_tensor *=  - self.e**2 / (2 * self.L)
 

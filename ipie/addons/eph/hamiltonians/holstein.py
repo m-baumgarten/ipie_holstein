@@ -52,7 +52,7 @@ class HolsteinModel(GenericEPhModel):
         self.t = t
         self.w0 = w0
         self.m = 1 / self.w0
-        self.const = numpy.sqrt(2.0 * self.m * self.w0)
+        #self.const = numpy.sqrt(2.0 * self.m * self.w0)
 
     def build(self) -> None:
         """Sets electronic hopping, electron-phonon couling tensor and defines
@@ -63,7 +63,7 @@ class HolsteinModel(GenericEPhModel):
     def build_T_1D(self, nsites) -> Sequence[numpy.ndarray]:
         T = numpy.diag(numpy.ones(nsites - 1), 1)
         T += numpy.diag(numpy.ones(nsites - 1), -1)
-        if self.pbc:
+        if self.pbc and nsites != 1:
             T[0, -1] = T[-1, 0] = 1.0
         T *= -self.t
         return T
@@ -87,7 +87,7 @@ class HolsteinModel(GenericEPhModel):
             Ix = numpy.eye(self.nsites[0])
             Iy = numpy.eye(self.nsites[1])
             Iz = numpy.eye(self.nsites[2])
-            T = numpy.kron(Tx, Iy, Iz) + numpy.kron(Ix, Ty, Iz) + numpy.kron(Ix, Iy, Tz)
+            T = numpy.kron(numpy.kron(Tx, Iy), Iz) + numpy.kron(numpy.kron(Ix, Ty), Iz) + numpy.kron(numpy.kron(Ix, Iy), Tz)
 
         T = [T.copy(), T.copy()]
         return T

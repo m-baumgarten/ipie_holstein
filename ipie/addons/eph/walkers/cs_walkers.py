@@ -52,9 +52,15 @@ class EPhCSWalkers(EPhWalkers):
         verbose: bool = False,
     ):
         super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
-#        self.phonon_disp *= numpy.sqrt(2 / (trial.m * trial.w0)) # Makes this expected position instead of beta
-        self.coherent_state_shift = self.phonon_disp #list aliasing, pop_controller uses phonon_disp
+        self.phonon_disp = xp.array(
+            [initial_walker[:, 0].copy() for iw in range(self.nwalkers)],
+            dtype=xp.complex128,
+        )
+        # Keep the old phonon_disp name as an alias for population-control code.
+        self.coherent_state_shift = self.phonon_disp
 
     def build(self, trial):
-        self.phonon_disp /= numpy.sqrt(2 / (trial.m * trial.w0)) #to counter build of EPhWalkers
+        # Counter EPhWalkers.build(), which converts position walkers from beta
+        # to <X>. Coherent-state walkers should remain in beta coordinates.
+        self.phonon_disp /= numpy.sqrt(2 / (trial.m * trial.w0))
         super().build(trial)

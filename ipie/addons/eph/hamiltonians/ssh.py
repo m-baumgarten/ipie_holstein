@@ -18,6 +18,12 @@ from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.utils.backend import arraylib as xp
 
+def nd_id(n, d):
+    out = numpy.zeros( (n,) * d )
+    out[ tuple([numpy.arange(n)] * d) ] = 1
+    return out
+
+
 class BondSSHModel(HolsteinModel):
     """Class for SSH model carrying elph tensor and system parameters
     """
@@ -31,18 +37,43 @@ class BondSSHModel(HolsteinModel):
         return g_tensor
 
 class OpticalSSHModel(HolsteinModel):
-    def build_g(self) -> numpy.ndarray:
-        """"""
-        g_tensor = numpy.zeros((self.N, self.N, self.N), dtype=numpy.complex128)
-        for site in range(self.N):
+    def build_g_1D(self, nsites) -> numpy.ndarray:
+        g_tensor = numpy.zeros((nsites, nsites, nsites), dtype=numpy.complex128)
+        if nsites == 1:
+            return g_tensor
+        for site in range(nsites):
             i = site
-            j = (site+1) % self.N
+            j = (site+1) % nsites
             g_tensor[j, i, i] = -1
             g_tensor[i, j, i] = -1
             g_tensor[j, i, j] = 1.
             g_tensor[i, j, j] = 1.
         g_tensor *= self.g
         return g_tensor
+
+    def build_g(self) -> numpy.ndarray:
+        """"""
+        if self.dim == 1:
+            g_tensor = self.build_g_1D(self.nsites[0])
+
+        if self.dim == 2:
+            gx = self.build_g_1D(self.nsites[0])
+            gy = self.build_g_1D(self.nsites[1])
+            Ix = nd_id(self.nsites[0], 3)
+            Iy = nd_id(self.nsites[1], 3) 
+            g_tensor = numpy.kron(gx, Iy) + numpy.kron(Ix, gy)
+
+        if self.dim == 3:
+            gx = self.build_g_1D(self.nsites[0])
+            gy = self.build_g_1D(self.nsites[1])
+            gz = self.build_g_1D(self.nsites[2])
+            Ix = nd_id(self.nsites[0], 3)
+            Iy = nd_id(self.nsites[1], 3)
+            Iz = nd_id(self.nsites[2], 3)
+            g_tensor = numpy.kron(numpy.kron(gx, Iy), Iz) + numpy.kron(numpy.kron(Ix, gy), Iz) + numpy.kron(numpy.kron(Ix, Iy), gz)
+
+        return g_tensor
+
 
 class DualCouplingModel(HolsteinModel):
     r"""Benchmarked with MA and DiagMC by Berciu in https://link.aps.org/doi/10.1103/PhysRevB.95.035117"""

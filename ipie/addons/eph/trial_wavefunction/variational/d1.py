@@ -17,7 +17,7 @@ from typing import List, Union
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 import jax
 import jax.numpy as npj
-import plum
+#import plum
 from ipie.addons.eph.trial_wavefunction.variational.dd1 import dD1Variational
 
 class D1Variational(dD1Variational):

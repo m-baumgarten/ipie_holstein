@@ -17,7 +17,7 @@ from typing import List, Union
 import jax
 import jax.numpy as npj
 import numpy as np
-import plum
+#import plum
 
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
 from ipie.addons.eph.hamiltonians.exciton_phonon_cavity import ExcitonPhononCavityElectron
@@ -28,6 +28,7 @@ from ipie.addons.eph.trial_wavefunction.variational.jax.toyozawa import (
 
 from ipie.addons.eph.hamiltonians.dispersive_phonons import DispersivePhononModel
 from ipie.addons.eph.trial_wavefunction.variational.dd1 import dD1Variational as dd1
+from ipie.addons.eph.trial_wavefunction.variational.d1 import D1Variational as d1
 
 class dD1Variational(ToyozawaVariational):
     def __init__(
@@ -41,18 +42,39 @@ class dD1Variational(ToyozawaVariational):
     ):
         super().__init__(shift_init, electron_init, hamiltonian, system, K, cplx)
         self.shift_params_rows = self.ham.N
-        self.dd1 = dd1(shift_init, electron_init, hamiltonian, system, K, cplx)
+        self.analytical = dd1(shift_init, electron_init, hamiltonian, system, K, cplx)
+        
+        
+        #hess debug:
+        import pyqcpbc.EPH as eph
+        from pyqcpbc.OPT import minimizer
+
+        solver = minimizer()
+        solver.cfg("algorithm", "gdm")
+        solver.cfg("maxiter", 10000)
+        solver.cfg("tol", 1e-7)
+        self.solver = solver
+#        hami = eph.holstein_model(self.ham.t, self.ham.g, self.ham.w0, self.ham.nsites)
+        hami = eph.optical_ssh_model(self.ham.t, self.ham.g, self.ham.w0, self.ham.nsites)
+        self.dd1 = eph.dd1(hami, K=K)
+
+
+        #K = 0.
+        #self.perms = np.array([self.perms[0]])
+        #self.nperms = 1
+        #self.Kcoeffs = np.array([self.Kcoeffs[0]])
 
     def objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
-        shift = shift[0]
+        shift = npj.squeeze(shift)
         c0a = c0a[:,0]
 
         num_energy = 0.0
         denom = 0.0
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
+            
             shift_i = npj.roll(shift, shift=(-ip, -ip), axis=(0, 1))
             # Alternatively shift_j = shift[permj,:][:,permj]
             psia_i = c0a[permi]
@@ -83,29 +105,32 @@ class dD1Variational(ToyozawaVariational):
                 * coeffi
             ).real
             denom += overlap.real
+#            jax.debug.print('ov: {x}', x=(ip, overlap / overlap_degeneracy(self.ham, ip), overlap_degeneracy(self.ham, ip)))
+#            jax.debug.print('en: {x}', x=(ip, projected_energy, overlap_degeneracy(self.ham, ip)))
+
 #            print(f'energy & ovlp {ip}', projected_energy, overlap, overlap_degeneracy(self.ham, ip))
 #            jax.debug.print('energy & ovlp {x}', x = (ip, projected_energy, overlap, overlap_degeneracy(self.ham, ip)))
 #        print('num_energy:  ', num_energy)
 #        print('denom:   ', denom)
+#        print("ovlep:   ", denom)
         energy = num_energy / denom
         # TODO
-#        jax.debug.print('energy:    {x}', x=(energy, num_energy, denom))
+        jax.debug.print('energy:    {x}', x=(energy, num_energy, denom))
 #        exit()
         return energy.real
 
     def _objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
-#        print('shift:   ', shift)
-#        print('c0a: ', c0a)
-#        print('c0b: ', c0b)
-#        exit()
 
-        shift = shift[0]
+        shift = npj.squeeze(shift)
         c0a = c0a[:,0]
 
         num_energy = 0.0
         denom = 0.0
+        
+        ov = npj.zeros((self.ham.N * self.ham.N), dtype=npj.complex128)
+        en = npj.zeros((self.ham.N * self.ham.N), dtype=npj.complex128)
 
         for ip, (permi, coeffi) in enumerate(zip(self.perms, self.Kcoeffs)):
             shift_i = npj.roll(shift, shift=(-ip, -ip), axis=(0, 1))
@@ -120,10 +145,8 @@ class dD1Variational(ToyozawaVariational):
 #                jax.debug.print('cs ovlp:   {x}', x=cs_ovlp)
 
                 overlap = npj.sum(psia_j.conj() * psia_i * cs_ovlp.diagonal())
+                ov = ov.at[jp + ip * self.ham.N].set((overlap))
                 overlap *= coeffj.conj() * coeffi
-
-#                if npj.abs(overlap) < zero_th:
-#                    continue
 
                 Ga_i = npj.outer(psia_j.conj(), psia_i)
                 if self.sys.ndown > 0:
@@ -131,7 +154,7 @@ class dD1Variational(ToyozawaVariational):
                 else:
                     Gb_i = npj.zeros_like(Ga_i)
                 G_i = [Ga_i, Gb_i]
-
+            
                 projected_energy = self.projected_energy(self.ham, G_i, shift_j, shift_i)
                 num_energy += (
                     projected_energy
@@ -139,16 +162,36 @@ class dD1Variational(ToyozawaVariational):
                     * coeffi
                 )
                 denom += overlap
-#                jax.debug.print('energy & ovlp {x}', x = (ip, jp, projected_energy, overlap))
+   #             jax.debug.print('energy & ovlp {x}', x = (ip, jp, projected_energy, overlap))
+                en = en.at[jp + ip * self.ham.N].set((projected_energy))
+    
+
+#        diff_hams = npj.zeros(self.ham.N, dtype=npj.float128)
+#        diff_ovls = npj.zeros(self.ham.N, dtype=npj.float128)
+#        for ip, permi in enumerate(self.perms):
+#            diff_hams.at[ip].set(npj.max(1e-16 + npj.abs(ham - npj.roll(ham, axis=(0,1), shift=(-ip,-ip)))))
+#            diff_ovls.at[ip].set(npj.max(npj.abs(ovl - npj.roll(ovl, axis=(0,1), shift=(-ip,-ip)))))
+#        ham -= ham.conj().T
+#        ovl -= ovl.conj().T
+#        jax.debug.print('energy & ovlp: {x}', x=(npj.max(diff_hams), npj.max(diff_ovls)))
 #        print('num_energy:  ', num_energy)
 #        print('denom:   ', denom)
+#        occ, freq = npj.unique(npj.round(ov,9), return_counts=True) 
+#        occ_en, freq_en = npj.unique(npj.round(en,9), return_counts=True)
+ #       occfreq = npj.vstack([occ, freq]).T
+ #       occfreq_en = npj.vstack([occ_en, freq_en]).T
+#        jax.debug.print('unique ov:  {x}', x=occfreq)
+#        jax.debug.print("unique en: {x}", x=occfreq_en)
+#        en2 = self._objective_function(x)
+
         energy = num_energy / denom
+#        jax.debug.print('diff: {x}', x=(npj.abs(en2 - energy), en2, energy))
         # TODO
 #        jax.debug.print('energy:    {x}', x=(energy, num_energy, denom))
-        exit()
+#        exit()
         return energy.real
     
-    def _objective_function(self, x, zero_th: float = 1e-12) -> float:
+    def __objective_function(self, x, zero_th: float = 1e-12) -> float:
         """"""
         shift, c0a, c0b = self.unpack_x(x)
 #        print('shift:   ', shift)
@@ -228,11 +271,11 @@ class dD1Variational(ToyozawaVariational):
         cs_ovlp *= cs_ovlp_norm
         return cs_ovlp
 
-    @plum.dispatch
+#    @plum.dispatch
     def projected_energy(self, ham: GenericEPhModel, G: list, shift_i, shift_j):
 
         cs_ovlp = self.cs_overlap(shift_i, shift_j)
-
+#        print("ham: ", ham.__dict__)
         kinetic = npj.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
 
         el_ph_contrib = npj.einsum("ijk,ij,ki,ij->", ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
@@ -251,22 +294,22 @@ class dD1Variational(ToyozawaVariational):
 #        jax.debug.print('contribs:  {x}', x=(kinetic, el_ph_contrib, phonon_contrib))
         return local_energy
 
-    @plum.dispatch
-    def projected_energy(self, ham: DispersivePhononModel, G: list, shift_i, shift_j):
-        cs_ovlp = self.cs_overlap(shift_i, shift_j)
-        kinetic = npj.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
+#    @plum.dispatch
+#    def projected_energy(self, ham: DispersivePhononModel, G: list, shift_i, shift_j):
+#        cs_ovlp = self.cs_overlap(shift_i, shift_j)
+#        kinetic = npj.sum((ham.T[0] * G[0] + ham.T[1] * G[1]) * cs_ovlp)
+#
+#        el_ph_contrib = npj.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
+#        el_ph_contrib += npj.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
+#        if self.sys.ndown > 0:
+#            el_ph_contrib = npj.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
+#            el_ph_contrib += npj.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
 
-        el_ph_contrib = npj.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
-        el_ph_contrib += npj.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
-        if self.sys.ndown > 0:
-            el_ph_contrib = npj.einsum('ijk,ij,ki,ij->', ham.g_tensor, G[0], shift_i.conj(), cs_ovlp)
-            el_ph_contrib += npj.einsum('ijk,ij,kj,ij->', ham.g_tensor, G[0], shift_j, cs_ovlp)
-
-        phonon_contrib = ham.w0 * npj.einsum('ij,j->', shift_i.conj() * shift_j, cs_ovlp.diagonal() * G[0].diagonal())
-        phonon_contrib += npj.einsum('ij,in,jn,n->', ham.ph_tensor, shift_i.conj(), shift_j, G[0].diagonal() * cs_ovlp.diagonal())
-        local_energy = kinetic + el_ph_contrib + phonon_contrib
-        jax.debug.print('ea:')
-        return local_energy
+#        phonon_contrib = ham.w0 * npj.einsum('ij,j->', shift_i.conj() * shift_j, cs_ovlp.diagonal() * G[0].diagonal())
+#        phonon_contrib += npj.einsum('ij,in,jn,n->', ham.ph_tensor, shift_i.conj(), shift_j, G[0].diagonal() * cs_ovlp.diagonal())
+#        local_energy = kinetic + el_ph_contrib + phonon_contrib
+#        jax.debug.print('ea:')
+#        return local_energy
 
 #    @plum.dispatch
 #    def projected_energy(self, ham: ExcitonPhononCavityElectron, G: list, shift_i, shift_j):

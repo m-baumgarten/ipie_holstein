@@ -45,16 +45,16 @@ class EnergyEstimatorFP(EnergyEstimator):
 
     def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
         walkers.ovlp = trial.calc_overlap(walkers)
-        G = trial.calc_greens_function(walkers)
+        trial.calc_greens_function(walkers)
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
-#        print('ovlp:    ', xp.max(walkers.ovlp), xp.min(walkers.ovlp))
-#        print('weight:  ', xp.max(walkers.weight_log), xp.min(walkers.weight_log))
-        weight = xp.exp(walkers.weight_log + xp.log(walkers.ovlp) - xp.max(walkers.weight_log + xp.log(walkers.ovlp)))
-        self._data["ENumer"] = xp.sum(weight * walkers.phase * energy[:, 0])
-        self._data["EDenom"] = xp.sum(weight * walkers.phase)   # * walkers.ovlp
-        self._data["E1Body"] = xp.sum(weight * walkers.phase * energy[:, 1])
-        self._data["E2Body"] = xp.sum(weight * walkers.phase * energy[:, 2])
+
+        mixed_weight = walkers.weight * walkers.phase * walkers.ovlp
+        self._data["ENumer"] = xp.sum(mixed_weight * energy[:, 0])
+        self._data["EDenom"] = xp.sum(mixed_weight)
+        self._data["E1Body"] = xp.sum(mixed_weight * energy[:, 1])
+        self._data["E2Body"] = xp.sum(mixed_weight * energy[:, 2])
+
         #        self._data["Eph"] = xp.sum(walkers.weight * walkers.phase * walkers.ovlp * energy[:, 3])
 
         return self.data

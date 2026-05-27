@@ -19,12 +19,16 @@ from ipie.estimators.estimator_base import EstimatorBase
 
 from ipie.addons.eph.estimators.local_energy_holstein import local_energy_holstein
 from ipie.addons.eph.estimators.local_energy_generic import local_energy_generic
+from ipie.addons.eph.estimators.local_energy_abinitio import local_energy_abinitio
+from ipie.addons.eph.hamiltonians.abinitio import AbInitioEPhHamiltonian
 from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
+from ipie.addons.eph.trial_wavefunction.abinitio import AbInitioDD2Trial
 
 from ipie.systems.generic import Generic
 from ipie.addons.eph.trial_wavefunction.eph_trial_base import EPhTrialWavefunctionBase
 from ipie.utils.backend import arraylib as xp
+from ipie.addons.eph.walkers.abinitio import AbInitioEPhWalkers
 from ipie.addons.eph.walkers.eph_walkers import EPhWalkers
 
 
@@ -45,6 +49,17 @@ def local_energy(
     trial: EPhTrialWavefunctionBase
 ):
     return local_energy_generic(system, hamiltonian, walkers, trial)
+
+
+@plum.dispatch
+def local_energy(
+    system: Generic,
+    hamiltonian: AbInitioEPhHamiltonian,
+    walkers: AbInitioEPhWalkers,
+    trial: AbInitioDD2Trial,
+):
+    return local_energy_abinitio(system, hamiltonian, walkers, trial)
+
 
 class EnergyEstimator(EstimatorBase):
     def __init__(
@@ -76,11 +91,14 @@ class EnergyEstimator(EstimatorBase):
     def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
         # Need to be able to dispatch here
         energy = local_energy(system, hamiltonian, walkers, trial)
-        self._data["ENumer"] = xp.sum(walkers.weight * energy[:, 0])
-        self._data["EDenom"] = xp.sum(walkers.weight)
-        self._data["EEl"] = xp.sum(walkers.weight * energy[:, 1].real)
-        self._data["EElPh"] = xp.sum(walkers.weight * energy[:, 2].real)
-        self._data["EPh"] = xp.sum(walkers.weight * energy[:, 3].real)
+        active = xp.isfinite(walkers.weight) & (xp.abs(walkers.weight) > 0.0)
+        weight = xp.where(active, walkers.weight, 0.0)
+        energy = xp.where(active[:, None], energy, 0.0)
+        self._data["ENumer"] = xp.sum(weight * energy[:, 0])
+        self._data["EDenom"] = xp.sum(weight)
+        self._data["EEl"] = xp.sum(weight * energy[:, 1].real)
+        self._data["EElPh"] = xp.sum(weight * energy[:, 2].real)
+        self._data["EPh"] = xp.sum(weight * energy[:, 3].real)
 
         return self.data
 
@@ -94,6 +112,13 @@ class EnergyEstimator(EstimatorBase):
         ix_proj = self._data_index["ETotal"]
         ix_nume = self._data_index["ENumer"]
         ix_deno = self._data_index["EDenom"]
+        if (not numpy.isfinite(data[ix_deno])) or numpy.abs(data[ix_deno]) == 0.0:
+            data[ix_proj] = numpy.nan
+            data[ix_nume] = 0.0
+            data[self._data_index["EEl"]] = numpy.nan
+            data[self._data_index["EElPh"]] = numpy.nan
+            data[self._data_index["EPh"]] = numpy.nan
+            return
         data[ix_proj] = data[ix_nume] / data[ix_deno]
         ix_nume = self._data_index["EEl"]
         data[ix_nume] = data[ix_nume] / data[ix_deno]
@@ -101,3 +126,31 @@ class EnergyEstimator(EstimatorBase):
         data[ix_nume] = data[ix_nume] / data[ix_deno]
         ix_nume = self._data_index["EPh"]
         data[ix_nume] = data[ix_nume] / data[ix_deno]
+
+
+class EnergyEstimatorNoImportance(EnergyEstimator):
+    r"""Mixed estimator for bare/no-importance Euler--Ito propagation.
+
+    Walker weights are not importance sampled, so the trial overlap remains in
+    the mixed-estimator numerator and denominator.
+    """
+
+    def compute_estimator(self, system, walkers, hamiltonian, trial, istep=1):
+        walkers.ovlp = trial.calc_overlap(walkers)
+        energy = local_energy(system, hamiltonian, walkers, trial)
+
+        active = (
+            xp.isfinite(walkers.weight)
+            & xp.isfinite(walkers.ovlp)
+            & (xp.abs(walkers.weight) > 0.0)
+        )
+        mixed_weight = xp.where(active, walkers.weight * walkers.ovlp, 0.0)
+        energy = xp.where(active[:, None], energy, 0.0)
+
+        self._data["ENumer"] = xp.sum(mixed_weight * energy[:, 0])
+        self._data["EDenom"] = xp.sum(mixed_weight)
+        self._data["EEl"] = xp.sum(mixed_weight * energy[:, 1])
+        self._data["EElPh"] = xp.sum(mixed_weight * energy[:, 2])
+        self._data["EPh"] = xp.sum(mixed_weight * energy[:, 3])
+
+        return self.data

@@ -344,7 +344,7 @@ class FPAFQMC(AFQMC):
                     initial_walker,
                     self.system.nup,
                     self.system.ndown,
-                    self.hamiltonian.nsites,
+                    self.hamiltonian.N,
                     self.params.num_walkers,
                 )
             elif isinstance(self.trial, EPhTrialWavefunctionBase):
@@ -352,7 +352,7 @@ class FPAFQMC(AFQMC):
                     initial_walker,
                     self.system.nup,
                     self.system.ndown,
-                    self.hamiltonian.nsites,
+                    self.hamiltonian.N,
                     self.params.num_walkers,
                 )
             else:
@@ -374,6 +374,15 @@ class FPAFQMC(AFQMC):
                 verbose=self.verbose,
             ) 
 
+#            self.estimators[block_number].compute_estimators(
+#                comm, self.system, self.hamiltonian, self.trial, self.walkers
+#            )
+#            self.estimators[block_number].print_block(
+#                comm,
+#                iter,
+#                self.accumulators,
+#                time_step=block_number,
+#            )
             for step in range(1, total_steps + 1):
                 synchronize()
                 start_step = time.time()
@@ -410,7 +419,7 @@ class FPAFQMC(AFQMC):
                 self.testim += time.time() - start  # we dump this time into estimator
                 # calculate estimators
                 start = time.time()
-                if step % self.params.num_steps_per_block == 0:
+                if step % self.params.num_steps_per_block == 0: #and step != total_steps:
                     self.estimators[block_number].compute_estimators(
                         comm, self.system, self.hamiltonian, self.trial, self.walkers
                     )

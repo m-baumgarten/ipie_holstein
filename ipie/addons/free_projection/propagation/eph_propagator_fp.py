@@ -74,7 +74,7 @@ class EPhPropagatorFP(EPhPropagatorFree):
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real)
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag)
 
-        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.N))
         walkers.phonon_disp = walkers.phonon_disp + N
 
         pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
@@ -83,7 +83,7 @@ class EPhPropagatorFP(EPhPropagatorFree):
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag)
 
         # Does not matter for estimators but helps with population control
-        walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2)
+        walkers.weight *= numpy.exp(self.dt_ph * self.N * self.w0 / 2)
         synchronize()
         self.timer.tgemm += time.time() - start_time
 
@@ -108,12 +108,12 @@ class EPhPropagatorFPImportance(EPhPropagatorFP):
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
-        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
+        pot -= 0.5 * hamiltonian.N * hamiltonian.w0
         pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag / 2)
 
-        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.N))
         drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
         walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
 
@@ -122,10 +122,15 @@ class EPhPropagatorFPImportance(EPhPropagatorFP):
 
         pot = 0.5 * hamiltonian.m * hamiltonian.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
         pot -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
-        pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0
+        pot -= 0.5 * hamiltonian.N * hamiltonian.w0
         pot_real, pot_imag = numpy.real(pot), numpy.imag(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot_real / 2)
         walkers.phase *= numpy.exp(-1j * self.dt_ph * pot_imag / 2)
+
+        # NEW
+        walkers.weight *= numpy.abs(ovlp_old / ovlp_new)
+        walkers.phase *= numpy.exp(1j * numpy.angle(ovlp_old / ovlp_new))
+        #####
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
@@ -156,20 +161,27 @@ class EPhPropagatorFPImportance(EPhPropagatorFP):
         synchronize()
         self.timer.tgf += time.time() - start_time
 
+        ovlp = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp
+
         # Update Walkers
         # a) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
 
         # b) One-body propagation for electrons
-        ovlp = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp
+#        ovlp = trial.calc_overlap(walkers)
+#        walkers.ovlp = ovlp
         self.propagate_electron(walkers, hamiltonian, trial)
-        ovlp_new = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp_new
-        self.update_weight(walkers, ovlp, ovlp_new)
+#        ovlp_new = trial.calc_overlap(walkers)
+#        walkers.ovlp = ovlp_new
+#        self.update_weight(walkers, ovlp, ovlp_new)
         
         # c) DMC for phonon degrees of freedom
         self.propagate_phonons(walkers, hamiltonian, trial)
+
+        ovlp_new = trial.calc_overlap(walkers)
+        walkers.ovlp = ovlp_new
+        self.update_weight(walkers, ovlp, ovlp_new)
 
         # Update weights (and later do phaseless for multi-electron)
         start_time = time.time()

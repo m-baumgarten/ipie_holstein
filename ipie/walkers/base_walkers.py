@@ -74,7 +74,10 @@ class WalkerAccumulator:
             factor = self.nsteps_per_block
         nume = self.get_index("HybridEnergy")
         deno = self.get_index("Weight")
-        vals[nume] = vals[nume] / vals[deno]
+        if vals[deno] == 0.0:
+            vals[nume] = numpy.nan
+        else:
+            vals[nume] = vals[nume] / vals[deno]
         vals[deno] = vals[deno] / factor
         ix = self.get_index("WeightFactor")
         vals[ix] = vals[ix] / factor

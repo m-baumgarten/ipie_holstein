@@ -261,7 +261,8 @@ class FPAFQMC(AFQMC):
                     verbose=(comm.rank == 0 and self.verbose),
                     filename=f"{filename}.{i}",
                     observables=("energy",),
-                    free_projection=free_projection
+#                    free_projection=free_projection
+                    importance_sampling=free_projection
                 )
             )
         if additional_estimators is not None:

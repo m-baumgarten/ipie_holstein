@@ -15,3 +15,7 @@
 # Directory for additions to ipie which depend on the core ipie library.
 # New features should mirror the ipie layout e.g.
 # ipie/addons/finite_temperature/qmc/afqmc.py etc.
+
+from ipie.addons.eph.walkers.abinitio import AbInitioDD2Walkers, AbInitioEPhWalkers
+
+__all__ = ["AbInitioEPhWalkers", "AbInitioDD2Walkers"]

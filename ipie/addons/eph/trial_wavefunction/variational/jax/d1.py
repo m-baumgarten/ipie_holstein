@@ -19,6 +19,7 @@ import jax
 import jax.numpy as npj
 import plum
 from ipie.addons.eph.trial_wavefunction.variational.jax.dd1 import dD1Variational
+from ipie.addons.eph.trial_wavefunction.variational.d1 import D1Variational as d1
 
 class D1Variational(dD1Variational):
     def __init__(
@@ -35,4 +36,4 @@ class D1Variational(dD1Variational):
         self.perms = np.array([self.perms[0]])
         self.nperms = 1
         self.Kcoeffs = np.array([self.Kcoeffs[0]])
-
+        self.analytical = d1(shift_init, electron_init, hamiltonian, system, K, cplx)

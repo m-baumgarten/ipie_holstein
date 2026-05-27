@@ -33,6 +33,8 @@ def local_energy_generic(
     energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
 
     G = trial.calc_greens_function(walkers)
+    ovlp = trial.calc_overlap(walkers)
+
     walkers.Ga, walkers.Gb = G[0], G[1]
 
     # Hopping Contribution
@@ -50,8 +52,10 @@ def local_energy_generic(
     energy[:, 3] = 0.5 * hamiltonian.m * hamiltonian.w0 ** 2 * np.sum(walkers.phonon_disp ** 2, axis=1)
     energy[:, 3] -= 0.5 * hamiltonian.nsites * np.sum(hamiltonian.w0)
     energy[:, 3] -= 0.5 * trial.calc_phonon_laplacian(walkers) / hamiltonian.m
-
     energy[:, 0] = np.sum(energy[:,1:], axis=1)
+
+#    print('energy:  ', energy[966])
+#    print('weights: ', walkers.weight)
 
     return energy
 
@@ -64,7 +68,6 @@ def local_energy_generic(
 ) -> np.ndarray:
     energy = xp.zeros((walkers.nwalkers, 4), dtype=xp.complex128)
 
-    #ovlp = trial.calc_overlap(walkers)
     G = trial.calc_greens_function(walkers)
     walkers.Ga, walkers.Gb = G[0], G[1]
 

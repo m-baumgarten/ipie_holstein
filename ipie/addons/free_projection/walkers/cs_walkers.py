@@ -56,13 +56,24 @@ class EPhCSWalkersFP(EPhCSWalkers):
             for iw in range(self.nwalkers):
                 (self.phia[iw], Rup) = qr(self.phia[iw], mode=qr_mode)
                 det_i = xp.prod(xp.diag(Rup))
-                if det_i < 0:
-                    det_i *= -1
-                    self.phia[iw] *= -1
+                # Absorb det phase into phia so det_i becomes real non-negative.
+                # Works for both real (sign) and complex walkers; the previous
+                # `det_i < 0` check silently no-ops on complex dtypes.
+                abs_det = xp.abs(det_i)
+                if abs_det > 0:
+                    phase_i = det_i / abs_det
+                    self.phia[iw] /= phase_i
+                    det_i = abs_det
 
                 if ndown > 0:
                     (self.phib[iw], Rdn) = qr(self.phib[iw], mode=qr_mode)
-                    det_i *= xp.prod(xp.diag(Rdn))
+                    det_b = xp.prod(xp.diag(Rdn))
+                    abs_det_b = xp.abs(det_b)
+                    if abs_det_b > 0:
+                        phase_b = det_b / abs_det_b
+                        self.phib[iw] /= phase_b
+                        det_b = abs_det_b
+                    det_i *= det_b
 
                 detR += [det_i]
                 self.log_detR[iw] += xp.log(detR[iw])

@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Union
+from typing import Union, List
 from abc import ABCMeta, abstractmethod
 import numpy as np
+from numba.experimental import jitclass
+from numba import int32, float64, complex128
+
 
 class GenericEPhModel(metaclass=ABCMeta):
     
@@ -25,7 +28,7 @@ class GenericEPhModel(metaclass=ABCMeta):
     def __init__(self, nsites: Union[np.ndarray, int], pbc: bool):    
         if isinstance(nsites, np.ndarray):
             assert len(nsites.shape) == 1
-            assert len(nsites) < 3
+       #     assert len(nsites) < 3
             self.dim = len(nsites)
         else:
             self.dim = 1
@@ -33,6 +36,8 @@ class GenericEPhModel(metaclass=ABCMeta):
         self.nsites = nsites
         self.N = np.prod(nsites)
         self.pbc = pbc
+        #print(self.N, self.nsites)
+        #exit()
 
     @abstractmethod
     def build(self): ...

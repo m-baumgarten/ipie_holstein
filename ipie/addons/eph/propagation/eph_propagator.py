@@ -106,6 +106,7 @@ class EPhPropagatorFree:
         self.m = hamiltonian.m
         self.scale = numpy.sqrt(self.dt_ph / self.m)
         self.nsites = hamiltonian.nsites
+        self.N = hamiltonian.N
 
     def propagate_phonons(
         self, walkers: EPhWalkers, hamiltonian: HolsteinModel, trial: EPhTrialWavefunctionBase
@@ -136,7 +137,7 @@ class EPhPropagatorFree:
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot)
 
-        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.N))
         walkers.phonon_disp = walkers.phonon_disp + N
 
         pot = 0.25 * self.m * self.w0**2 * numpy.sum(walkers.phonon_disp**2, axis=1)
@@ -144,7 +145,7 @@ class EPhPropagatorFree:
         walkers.weight *= numpy.exp(-self.dt_ph * pot)
 
         # Does not matter for estimators but helps with population control
-        walkers.weight *= numpy.exp(self.dt_ph * self.nsites * self.w0 / 2)
+        walkers.weight *= numpy.exp(self.dt_ph * self.N * self.w0 / 2)
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
@@ -185,6 +186,7 @@ class EPhPropagatorFree:
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
             walkers.phib = numpy.einsum("nij,nje->nie", expEph, walkers.phib)
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
+#        print('phia:    ', walkers.phia[0])
 
     def propagate_walkers(
         self,
@@ -250,7 +252,8 @@ class EPhPropagatorFree:
             numpy.abs(ratio) * numpy.where(cos_phase > 0.0, cos_phase, 0.0), #>
             0.0,
         )
-        
+#        print('weight:  ', walkers.weight[0])
+
     def construct_EPh(self, walkers, hamiltonian) -> numpy.ndarray:
         return numpy.einsum('ijk,nk->nij', hamiltonian.g_tensor, walkers.phonon_disp)
 
@@ -295,8 +298,8 @@ class EPhPropagator(EPhPropagatorFree):
         pot -= 0.5 * hamiltonian.nsites * hamiltonian.w0  
         pot = numpy.real(pot)
         walkers.weight *= numpy.exp(-self.dt_ph * pot / 2)
-
-        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.nsites))
+        
+        N = numpy.random.normal(loc=0.0, scale=self.scale, size=(walkers.nwalkers, self.N))
         drift = numpy.real(trial.calc_phonon_gradient(walkers)).astype(numpy.complex128)
         walkers.phonon_disp = walkers.phonon_disp + N + self.dt_ph * drift / hamiltonian.m
         

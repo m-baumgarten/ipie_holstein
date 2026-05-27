@@ -25,8 +25,10 @@ class CoherentStateVariational(ToyozawaVariational):
         K: float = 0.0,
         cplx: bool = True,
     ):
+        self.K = np.zeros(hamiltonian.dim)
         super().__init__(shift_init, electron_init, hamiltonian, system, K, cplx)
-        assert K == 0.
+        assert np.allclose(K, np.zeros(hamiltonian.dim))
+        
         self.perms = np.array([self.perms[0]])
         self.nperms = 1
         self.Kcoeffs = np.array([self.Kcoeffs[0]])

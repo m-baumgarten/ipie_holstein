@@ -52,7 +52,13 @@ K = np.linspace(0, np.pi, nk, endpoint=True)
 
 var = ToyozawaVariational(initial_phonons, initial_electron, ham, system, 0., cplx=True)
 _, initial_phonons, initial_electron = var.run()
+
+np.save('ph_toyo_32.npy', initial_phonons)
+np.save('el_toyo_32.npy', initial_electron)
+exit()
+
 initial_phonons = D2_to_DTilde(np.squeeze(initial_phonons))
+
 
 #var = GlobalLocalVariational(initial_phonons, initial_electron, ham, system, 0., cplx=True)
 #_, initial_phonons, initial_electron = var.run()
@@ -60,10 +66,12 @@ initial_phonons = DTilde_to_D1(np.squeeze(initial_phonons))
 
 etrial = np.zeros(nk)
 
-#initial_electron = np.load('el_dd1_4_new.npy')
-#initial_phonons = np.load('ph_dd1_4_new.npy')
+#initial_electron = np.load('el_dd1_0_new.npy')
+#initial_phonons = np.load('ph_dd1_0_new.npy')
 #etrial = np.load('etrial_dd1_new.npy')
-
+initial_electron = np.load('el_test_init.npy')
+initial_phonons = np.load('ph_test_init.npy')
+ 
 for i,k in enumerate(K):
 #for i, k in enumerate(K[:5][::-1]):    
 #    i = 4 - i
@@ -72,7 +80,8 @@ for i,k in enumerate(K):
 
     var = dD1Variational(initial_phonons, initial_electron, ham, system, k, cplx=True)
     etrial[i], initial_phonons, initial_electron = var.run()
+    exit()
     np.save('etrial_dd1.npy', etrial)
     np.save(f'ph_dd1_{i}.npy', initial_phonons)
     np.save(f'el_dd1_{i}.npy', initial_electron)
-
+    exit()

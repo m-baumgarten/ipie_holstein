@@ -19,8 +19,8 @@ from typing import Tuple
 import jax
 import jax.numpy as npj
 import numpy as np
-import plum
-from line_profiler import LineProfiler
+#import plum
+#from line_profiler import LineProfiler
 from scipy.optimize import basinhopping, minimize
 
 from ipie.addons.eph.hamiltonians.eph_generic import GenericEPhModel
@@ -33,6 +33,35 @@ def print_fun(x, f, accepted):
 class Variational(metaclass=ABCMeta):
     def __init__(
         self,
+        shift_init: np.ndarray,
+        electron_init: np.ndarray,
+        hamiltonian,
+        system,
+        cplx: bool = True,
+    ):
+#        self.psi = electron_init.T.ravel()
+#        self.shift = shift_init.ravel()
+#
+#        self.ham = hamiltonian
+#        self.sys = system
+#
+#        self.shift_params_rows = 1  # D2 and Toyozawa Ansatz
+#
+#        if cplx:
+#            self.pack_x = self.pack_x_complex
+#            self.unpack_x = self.unpack_x_complex
+#        else:
+#            self.pack_x = self.pack_x_real
+#            self.unpack_x = self.unpack_x_real
+        self.init_no_recompile(shift_init, electron_init, hamiltonian, system, cplx)
+
+#        self._compiled_value_and_grad = jax.jit(jax.value_and_grad(self.objective_function))
+#        self._compiled_hessian_diag = jax.jit(jax.hessian(self.objective_function))
+#        self.grad_err = []
+#        self.hess_err = []
+    
+    def init_no_recompile(
+        self, 
         shift_init: np.ndarray,
         electron_init: np.ndarray,
         hamiltonian,
@@ -53,8 +82,10 @@ class Variational(metaclass=ABCMeta):
         else:
             self.pack_x = self.pack_x_real
             self.unpack_x = self.unpack_x_real
-#        self.grad_err = []
-#        self.hess_err = []
+
+
+
+
 
     @abstractmethod
     def objective_function(self) -> float: ...
@@ -67,10 +98,41 @@ class Variational(metaclass=ABCMeta):
     def gradient(self, x, *args) -> np.ndarray:
         """"""
         grad = np.array(jax.grad(self.objective_function)(x, *args), dtype=np.float64)
-#        hess = np.diag(np.array(jax.hessian(self.objective_function)(x, *args), dtype=np.float64))
-#        grad_dd1 = self.dd1.gradient(x)
+#        grad_anal = self.analytical.gradient(x)
+   #     print("AD grad: ", grad)
+#        hess_diag_ad = np.diag(np.array(jax.hessian(self.objective_function)(x, *args), dtype=np.float64))
+#        shift, c0a, _ = self.unpack_x(x)
+#        print("shift in py:   ", shift)
+#        print("electron in py:  ", c0a)
+#        el_hess, shift_hess = self.dd1.diagonal_hessian(c0a, shift)
+#        hess_diag_anal = self.pack_x(shift_hess.ravel(), el_hess.ravel())
+
+#        hess_anal_py = self.analytical.hess_diag(x)
+
+#        print("hess diff:   ", np.abs(hess_diag_anal -hess_diag_ad)) #, hess_anal_py)
+#        print('hess max diff:   ', np.max(np.abs(hess_diag_anal - hess_diag_ad)))
+#        el_grad, shift_grad = self.dd1.gradient(c0a, shift)
+#        grad_cpp = self.pack_x(shift_grad.ravel(), el_grad.ravel())
+#        print("grad diff:   ", np.max(np.abs(grad_cpp - grad)))
+
+#        exit()
+#       grad_dd1 = self.analytical.gradient(x)
+   #     print("ANAL grad:   ", grad_dd1)
 #        hess_dd1 = self.dd1.hess_diag(x)
-#        print('grad max diff:   ', np.max(np.abs(grad - grad_dd1)))
+   #     self.analytical._objective_function(x)
+  #      en_test = self.analytical.objective_function(x)
+   #     en_test2 = self.objective_function(x)
+    #    jax.debug.print("diff:  {x}", x=(npj.abs(en_test - en_test2)))
+  #      tmp_shift, c0a, _ = self.unpack_x(grad)
+   #     print("shift:   ", tmp_shift)
+    #    print("c0a:     ", c0a)
+#        print("AD grad: ", tmp_shift.real)
+#        exit()
+    #    jax.debug.print('grad diff:   {x}', x=(grad, grad_dd1))
+     #   jax.debug.print('grad max diff:   {x}', x=npj.max(npj.abs(grad - grad_dd1)))
+#        exit()
+#       print('grad max diff:   ', np.abs(grad[-32:] / grad_dd1[-32:]))
+   #     exit()
 #        print('hess max diff:   ', np.max(np.abs(hess - hess_dd1)))
 #        self.grad_err.append(np.max(np.abs(grad - grad_dd1)))
 #        self.hess_err.append(np.max(np.abs(hess - hess_dd1)))
@@ -80,6 +142,14 @@ class Variational(metaclass=ABCMeta):
 #        np.save('/n/home01/mbaumgarten/Software/ipie/examples/17-exciton_phonon_cavity/dd1/scan_32sites/03/04/diff.npy', np.abs(self.dd1.gradient(x) - grad))
 #        np.save('/n/home01/mbaumgarten/Software/ipie/examples/17-exciton_phonon_cavity/dd1/scan_32sites/03/04/x.npy', x)
         return grad
+
+    def _gradient(self, x, *args):
+        val, grad = self._compiled_value_and_grad(x)
+        return np.array(grad, dtype=np.float64)
+
+    def _hess_diag(self, x, *args):
+        hess = self._compiled_hessian_diag(x)
+        return np.diag(np.array(hess, dtype=np.float64))
 
     def hess_diag(self, x, *args) -> np.ndarray:
         hess = np.diag(np.array(jax.hessian(self.objective_function)(x, *args), dtype=np.float64))
@@ -129,10 +199,10 @@ class Variational(metaclass=ABCMeta):
                 method="L-BFGS-B",
                 options={
                     "maxls": 20,
-                    "gtol": 1e-14,
-                    "eps": 1e-14,
+                    "gtol": 1e-10,
+                    "eps": 1e-10,
                     "maxiter": 15000,
-                    "ftol": 1.0e-14,
+                    "ftol": 1.0e-10,
                     "maxcor": 5000, #prev 1000
                     "maxfun": 15000,
                     "disp": True,
@@ -175,9 +245,10 @@ class Variational(metaclass=ABCMeta):
             psi = self.psi
 
         nparams = (
-            2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N
+#            2 * (self.sys.nup + self.sys.ndown + self.ham.dim * self.shift_params_rows) * self.ham.N 
+            2 * (self.sys.nup + self.sys.ndown + self.shift_params_rows) * self.ham.N
         )
-        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_real = self.ham.N * self.shift_params_rows # * self.ham.dim
         index_shift_complex = 2 * index_shift_real
         index_psi_real = index_shift_complex + (self.sys.ndown + self.sys.nup) * self.ham.N
         index_psi_complex = index_psi_real + (self.sys.ndown + self.sys.nup) * self.ham.N
@@ -193,19 +264,21 @@ class Variational(metaclass=ABCMeta):
         """Extracts shift and Slater determinants from x array, which is passed to
         the objective function."""
         # Make these class attributes s.t. we only need to change these for defining D1 or D2 trial
-        index_shift_real = self.ham.N * self.ham.dim * self.shift_params_rows
+        index_shift_real = self.ham.N * self.shift_params_rows # * self.ham.dim
         index_shift_complex = 2 * index_shift_real
         index_c0a_real = index_shift_complex + self.sys.nup * self.ham.N
 
         shift_real = x[:index_shift_real].copy()
         shift_real = jax.numpy.reshape(
-            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+#            shift_real, (self.ham.dim, self.ham.N, self.shift_params_rows)
+            shift_real, (self.ham.N, self.shift_params_rows)
         )
         shift_real = shift_real.astype(np.float64)
 
         shift_complex = x[index_shift_real:index_shift_complex].copy()
         shift_complex = jax.numpy.reshape(
-            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+#            shift_complex, (self.ham.dim, self.ham.N, self.shift_params_rows)
+            shift_complex, (self.ham.N, self.shift_params_rows)
         )
         shift_complex = shift_complex.astype(np.float64)
 
@@ -278,7 +351,7 @@ class Variational(metaclass=ABCMeta):
 
         return shift, c0a, c0b
 
-    @plum.dispatch
+#    @plum.dispatch
     def initial_guess(self, ham: GenericEPhModel) -> None:
         _, elec_eigvecs_a = np.linalg.eigh(ham.T[0])
         psia = elec_eigvecs_a[:, : self.sys.nup]

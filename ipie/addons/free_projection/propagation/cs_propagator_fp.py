@@ -46,7 +46,7 @@ class CoherentStatePropagatorFP(CoherentStatePropagator):
         phase = numpy.angle(ratio)
 
         walkers.weight *= numpy.abs(ratio)
-        walkers.phase *= numpy.exp(1j * numpy.angle(phase))
+        walkers.phase *= numpy.exp(1j * phase)
     
     def propagate_phonons(
         self,
@@ -56,14 +56,14 @@ class CoherentStatePropagatorFP(CoherentStatePropagator):
     ) -> None:
         
         # Normalized CS
-#        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
-#        weight_exponent = -0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1)
-#        weight_exponent *= numpy.exp(self.dt * hamiltonian.w0) - 1
-#        walkers.weight *= numpy.exp(weight_exponent)
-#        walkers.weight_log += weight_exponent
+        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
+        weight_exponent = -0.5 * numpy.sum(numpy.abs(walkers.coherent_state_shift) ** 2, axis=1)
+        weight_exponent *= numpy.exp(self.dt * hamiltonian.w0) - 1
+        walkers.weight *= numpy.exp(weight_exponent)
+        walkers.weight_log += weight_exponent
 
         # Unnormalized CS
-        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
+#        walkers.coherent_state_shift *= numpy.exp(-self.dt_ph * hamiltonian.w0)
 
     def propagate_electron(
         self, 
@@ -71,64 +71,58 @@ class CoherentStatePropagatorFP(CoherentStatePropagator):
         hamiltonian: GenericEPhModel, 
         trial: EPhTrialWavefunctionBase
     ) -> None:
-        new_scale = 0.1
+        new_scale = 0.7 #numpy.sqrt(self.dt)
 
         start_time = time.time()
         synchronize()
         self.timer.tgf += time.time() - start_time
         
         # Normalized CS
-#        N = numpy.random.normal(loc=0.0, scale=new_scale, size=(2, walkers.nwalkers, self.nsites))
-        
-        # Unnormalized CS
-        N = numpy.random.normal(loc=0.0, scale=1/numpy.sqrt(2), size=(2, walkers.nwalkers, self.nsites))
-        new_coherent_shift = N[0] #+ 1j * N[1]
+        N = numpy.random.normal(loc=0.0, scale=new_scale, size=(2, walkers.nwalkers, hamiltonian.N))
+        new_coherent_shift = N[0] + 1j * N[1]
 
         EPh = self.construct_EPh(walkers, hamiltonian, new_coherent_shift, trial)
         expEph = scipy.linalg.expm(-self.dt * EPh)
+        exp_bch = self.construct_bch_propagator(walkers, hamiltonian)
 
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
         walkers.phia = numpy.einsum("nij,nje->nie", expEph, walkers.phia)
+        walkers.phia = self.apply_bch_propagator(walkers.phia, exp_bch)
         walkers.phia = propagate_one_body(walkers.phia, self.expH1[0])
 
         if walkers.ndown > 0:
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
             walkers.phib = numpy.einsum("nij,nje->nie", expEph, walkers.phib)
+            walkers.phib = self.apply_bch_propagator(walkers.phib, exp_bch)
             walkers.phib = propagate_one_body(walkers.phib, self.expH1[1])
 
-        
-        # Unnormalized CS
-        walkers.weight *= numpy.exp(numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.real + new_coherent_shift.imag * walkers.coherent_state_shift.imag, axis=1))
-        walkers.weight_log += numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.real + new_coherent_shift.imag * walkers.coherent_state_shift.imag, axis=1)
-#        walkers.weight *= numpy.exp(hamiltonian.g * self.dt * numpy.sum(trial.mf_eph))
-#        walkers.weight_log += hamiltonian.g * self.dt * numpy.sum(trial.mf_eph)
-        walkers.coherent_state_shift = new_coherent_shift
+        # Full complex HS phase factor; no phaseless projection in free projection.
+        weight_fac = numpy.exp(1j * numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real, axis=1))
+        walkers.weight *= weight_fac
+        walkers.weight_log += 1j * numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real, axis=1)
 
-        # Normalized CS
-#        weight_fac = numpy.exp(1j * numpy.sum(new_coherent_shift.real * walkers.coherent_state_shift.imag - new_coherent_shift.imag * walkers.coherent_state_shift.real, axis=1))
-#        walkers.weight_log += numpy.log(numpy.abs(weight_fac))
-#        walkers.weight *= numpy.abs(weight_fac)
+        # Constant 2^N factor from combining dγ_R dγ_I with the 1/π measure.
+        walkers.weight *= 2 ** hamiltonian.N
+        walkers.weight_log += hamiltonian.N * numpy.log(2)
 
-#        phase = numpy.angle(weight_fac)
-#        walkers.phase *= numpy.exp(1j * phase)
-        
-#        mf = numpy.exp(hamiltonian.g * self.dt * numpy.sum(trial.mf_eph))
-#        walkers.weight_log += numpy.log(numpy.abs(mf))
-#        walkers.weight *= numpy.abs(mf)
-#        walkers.phase *= numpy.exp(1j * numpy.angle(mf))
-        
-#        walkers.coherent_state_shift += new_coherent_shift
-        
-#        walkers.weight_log += numpy.log(new_scale) -0.5 * (1 - 1/new_scale**2) * numpy.sum(numpy.abs(new_coherent_shift)**2, axis=1)
-#        walkers.weight *= new_scale * numpy.exp(-0.5 * (1 - 1/new_scale**2) * numpy.sum(numpy.abs(new_coherent_shift)**2, axis=1))
+        walkers.coherent_state_shift += new_coherent_shift
+
+        # Importance reweighting for sampling N_R, N_I ~ N(0, new_scale) instead of N(0, 1).
+        # Product over 2*N independent scalar samples gives new_scale**(2N) prefactor;
+        # exponent has no extra factor of N (was a pre-existing bug).
+        reweight_log = (
+            2 * hamiltonian.N * numpy.log(new_scale)
+            - 0.5 * (1 - 1 / new_scale ** 2) * numpy.sum(numpy.abs(new_coherent_shift) ** 2, axis=1)
+        )
+        walkers.weight *= numpy.exp(reweight_log)
+        walkers.weight_log += reweight_log
 
     def construct_EPh(
         self, walkers: EPhCSWalkersFP, hamiltonian: GenericEPhModel, new_shift: numpy.ndarray, trial
     ) -> numpy.ndarray:
         # Normalized CS
-#        cs_displ = new_shift.conj() + 2 * walkers.coherent_state_shift.real - trial.mf_eph
+        cs_displ = new_shift.conj() + 2 * walkers.coherent_state_shift.real #- trial.mf_eph
         
         # Unnormalized CS
-        cs_displ = new_shift.conj() + walkers.coherent_state_shift #- trial.mf_eph
+#        cs_displ = new_shift.conj() + walkers.coherent_state_shift #- trial.mf_eph
         return numpy.einsum('ijk,nk->nij', hamiltonian.g_tensor, cs_displ)
-
