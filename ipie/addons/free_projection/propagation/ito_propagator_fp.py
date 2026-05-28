@@ -12,7 +12,100 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
+
+import numpy
+
 from ipie.addons.eph.propagation.ito_propagator import EulerItoPropagator
+from ipie.estimators.greens_function_single_det import gab_mod_ovlp
+from ipie.utils.backend import synchronize
+
+
+def _coherent_state_overlap(beta_bra, beta_ket, convention):
+    if convention == "normalized":
+        exponent = -0.5 * (
+            numpy.sum(numpy.abs(beta_bra) ** 2) + numpy.sum(numpy.abs(beta_ket) ** 2)
+        )
+        exponent += numpy.sum(beta_bra.conj() * beta_ket)
+        return numpy.exp(exponent)
+    return numpy.exp(numpy.sum(beta_bra.conj() * beta_ket))
+
+
+def _electronic_overlap(psia_bra, psia_ket, psib_bra=None, psib_ket=None):
+    overlap = numpy.linalg.det(psia_bra.conj().T.dot(psia_ket))
+    if psib_bra is not None and psib_ket is not None:
+        overlap *= numpy.linalg.det(psib_bra.conj().T.dot(psib_ket))
+    return overlap
+
+
+def _contract_eph_mean_field(g_tensor, ga, gb):
+    return numpy.einsum("ijk,ij->k", g_tensor, ga + gb)
+
+
+def construct_trial_eph_mean_field(hamiltonian, trial, zero_threshold=1e-12):
+    r"""Compute ``<trial|G_mu|trial>/<trial|trial>`` for static subtraction."""
+    required = ("g_tensor", "N")
+    if any(not hasattr(hamiltonian, attr) for attr in required):
+        raise TypeError("Mean-field subtraction requires an electron-phonon Hamiltonian.")
+
+    required = ("psia", "beta_shift", "ndown")
+    if any(not hasattr(trial, attr) for attr in required):
+        raise TypeError("Mean-field subtraction requires an electron-phonon trial state.")
+
+    g_tensor = numpy.asarray(hamiltonian.g_tensor, dtype=numpy.complex128)
+    convention = getattr(trial, "coherent_state_convention", "unnormalized")
+    beta = numpy.asarray(trial.beta_shift, dtype=numpy.complex128)
+    psia = numpy.asarray(trial.psia, dtype=numpy.complex128)
+    psib = numpy.asarray(
+        getattr(trial, "psib", numpy.empty((psia.shape[0], 0))), dtype=numpy.complex128
+    )
+
+    numerator = numpy.zeros(hamiltonian.N, dtype=numpy.complex128)
+    denominator = 0.0j
+
+    if hasattr(trial, "perms") and hasattr(trial, "kcoeffs"):
+        perms = numpy.asarray(trial.perms)
+        kcoeffs = numpy.asarray(trial.kcoeffs, dtype=numpy.complex128)
+        for ibra, perm_bra in enumerate(perms):
+            psia_bra = psia[perm_bra, :]
+            beta_bra = beta[perm_bra]
+            psib_bra = psib[perm_bra, :] if trial.ndown > 0 else None
+
+            for iket, perm_ket in enumerate(perms):
+                psia_ket = psia[perm_ket, :]
+                beta_ket = beta[perm_ket]
+                psib_ket = psib[perm_ket, :] if trial.ndown > 0 else None
+
+                overlap = _electronic_overlap(psia_bra, psia_ket, psib_bra, psib_ket)
+                overlap *= _coherent_state_overlap(beta_bra, beta_ket, convention)
+                overlap *= kcoeffs[ibra].conj() * kcoeffs[iket]
+                if numpy.abs(overlap) < zero_threshold:
+                    continue
+
+                ga, _, _ = gab_mod_ovlp(psia_bra, psia_ket)
+                if trial.ndown > 0:
+                    gb, _, _ = gab_mod_ovlp(psib_bra, psib_ket)
+                else:
+                    gb = numpy.zeros_like(ga)
+
+                numerator += overlap * _contract_eph_mean_field(g_tensor, ga, gb)
+                denominator += overlap
+    else:
+        psib_bra = psib if trial.ndown > 0 else None
+        overlap = _electronic_overlap(psia, psia, psib_bra, psib_bra)
+        overlap *= _coherent_state_overlap(beta, beta, convention)
+        if numpy.abs(overlap) >= zero_threshold:
+            ga, _, _ = gab_mod_ovlp(psia, psia)
+            if trial.ndown > 0:
+                gb, _, _ = gab_mod_ovlp(psib, psib)
+            else:
+                gb = numpy.zeros_like(ga)
+            numerator += overlap * _contract_eph_mean_field(g_tensor, ga, gb)
+            denominator += overlap
+
+    if numpy.abs(denominator) < zero_threshold:
+        raise ValueError("Cannot construct mean-field subtraction from a zero-overlap trial.")
+    return numerator / denominator
 
 
 class EulerItoPropagatorFP(EulerItoPropagator):
@@ -31,8 +124,69 @@ class EulerItoPropagatorFP(EulerItoPropagator):
     :math:`E[dZ_\mu^* dZ_\nu]=\delta_{\mu\nu}d\tau`.
     """
 
-    def __init__(self, time_step, verbose=False):
+    def __init__(
+        self,
+        time_step,
+        verbose=False,
+        mean_field_subtraction=False,
+        mean_field_shift=None,
+    ):
         super().__init__(time_step, verbose=verbose)
+        self.mean_field_subtraction = mean_field_subtraction or mean_field_shift is not None
+        self._input_mean_field_shift = mean_field_shift
+        self.eph_mean_field = None
+        self.g_tensor_residual = None
+        self.g_tensor_residual_dagger = None
+
+    def build(self, hamiltonian, trial=None, walkers=None, mpi_handler=None) -> None:
+        super().build(hamiltonian, trial=trial, walkers=walkers, mpi_handler=mpi_handler)
+
+        if self._input_mean_field_shift is not None:
+            mean_field = numpy.asarray(self._input_mean_field_shift, dtype=numpy.complex128)
+            if mean_field.shape != (hamiltonian.N,):
+                raise ValueError(
+                    "mean_field_shift must have shape "
+                    f"({hamiltonian.N},), not {mean_field.shape}."
+                )
+        elif self.mean_field_subtraction:
+            mean_field = construct_trial_eph_mean_field(hamiltonian, trial)
+        else:
+            mean_field = numpy.zeros(hamiltonian.N, dtype=numpy.complex128)
+
+        self.eph_mean_field = mean_field
+        identity = numpy.eye(hamiltonian.g_tensor.shape[0], dtype=numpy.complex128)
+        self.g_tensor_residual = numpy.asarray(
+            hamiltonian.g_tensor, dtype=numpy.complex128
+        ).copy()
+        self.g_tensor_residual -= identity[:, :, None] * self.eph_mean_field[None, None, :]
+        self.g_tensor_residual_dagger = numpy.swapaxes(self.g_tensor_residual.conj(), 0, 1)
+
+    def propagate(self, walkers, hamiltonian, trial) -> None:
+        r"""Apply one Euler--Maruyama step with static mean-field subtraction."""
+        start_time = time.time()
+
+        shift_old = walkers.coherent_state_shift.copy()
+        dZ = self.sample_complex_noise(walkers, hamiltonian)
+
+        h_eff = self.construct_annihilation_matrix(shift_old, hamiltonian)
+        creation = self.construct_creation_matrix(dZ, hamiltonian)
+
+        walkers.phia = self.apply_electronic_euler_step(walkers.phia, h_eff[0], creation)
+        if walkers.ndown > 0:
+            walkers.phib = self.apply_electronic_euler_step(walkers.phib, h_eff[1], creation)
+
+        walkers.coherent_state_shift += (
+            -self.dt * hamiltonian.w0 * shift_old
+            - self.dt * self.eph_mean_field.conj()
+            + dZ
+        )
+
+        synchronize()
+        self.timer.tgemm += time.time() - start_time
+
+    def construct_creation_matrix(self, dZ, hamiltonian):
+        r"""Build ``sum_mu dZ_mu^* (G_mu^\dagger - gbar_mu^* I)``."""
+        return numpy.einsum("ijk,nk->nij", self.g_tensor_residual_dagger, dZ.conj())
 
     def update_weight(self, walkers, ovlp=None, ovlp_new=None) -> None:
         """Bare free projection: leave weight, phase, and weight_log untouched."""

@@ -6,6 +6,7 @@
 *.out
 *.hdf5
 *.h5 # Make these hard to add
+estimate.h5*
 *.err
 *.sh
 *.npy

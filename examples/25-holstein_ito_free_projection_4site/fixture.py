@@ -134,6 +134,6 @@ def build_workflow(inputs: HolsteinItoFPInputs, timestep: float = 1.0e-4):
     )
     walkers.build(trial)
 
-    propagator = EulerItoPropagatorFP(time_step=timestep)
+    propagator = EulerItoPropagatorFP(time_step=timestep, mean_field_subtraction=True)
     propagator.build(ham, trial, walkers)
     return system, ham, trial, walkers, propagator
