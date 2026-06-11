@@ -22,9 +22,22 @@ from ipie.walkers.base_walkers import BaseWalkers
 from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
 
 class EPhCSWalkersFP(EPhCSWalkers):
-    def __init__(self, initial_walker: numpy.ndarray, nup: int, ndown: int, nbasis: int, nwalkers: int, verbose: bool = False):
+    def __init__(
+        self,
+        initial_walker: numpy.ndarray,
+        nup: int,
+        ndown: int,
+        nbasis: int,
+        nwalkers: int,
+        mpi_handler=None,
+        verbose: bool = False,
+    ):
         super().__init__(initial_walker, nup, ndown, nbasis, nwalkers, verbose)
+        self.mpi_handler = mpi_handler
         self.weight_log = xp.log(self.weight)
+        self.buff_names += ["weight_log"]
+        self.buff_size = round(self.set_buff_size_single_walker() / float(self.nwalkers))
+        self.walker_buffer = numpy.zeros(self.buff_size, dtype=numpy.complex128)
 
     def orthogonalise(self, free_projection=True):
         """Orthogonalise all walkers.

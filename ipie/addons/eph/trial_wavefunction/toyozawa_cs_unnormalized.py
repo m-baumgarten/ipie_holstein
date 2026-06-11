@@ -128,3 +128,88 @@ class ToyozawaTrialUnnormalizedCoherentState(ToyozawaTrialCoherentState):
             walkers.ph_ovlp[:, ip] = np.prod(ph_ov, axis=1)
 
         return walkers.ph_ovlp
+
+    def calc_ito_force_bias(
+        self,
+        walkers: EPhCSWalkers,
+        g_tensor_residual_dagger: np.ndarray,
+        zero_overlap_threshold: float = 1.0e-14,
+    ) -> np.ndarray:
+        r"""Return the proper-complex Ito drift from the log trial overlap.
+
+        The returned drift is
+
+            0.5 Re(A - B) + 0.5j Re(i(A + B)),
+
+        where A is the coherent-state log derivative and B is the electronic
+        response to the same residual creation generator used by the propagator.
+        """
+        A, B = self.calc_ito_log_derivatives(
+            walkers,
+            g_tensor_residual_dagger,
+            zero_overlap_threshold=zero_overlap_threshold,
+        )
+        return 0.5 * (A.conj() - B)
+
+    def calc_ito_log_derivatives(
+        self,
+        walkers: EPhCSWalkers,
+        g_tensor_residual_dagger: np.ndarray,
+        zero_overlap_threshold: float = 1.0e-14,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        r"""Return the ``A`` and ``B`` log-overlap derivatives for Ito gauges."""
+        self.calc_overlap_perm(walkers)
+        overlap = np.sum(walkers.ovlp_perm, axis=1)
+
+        rho = np.zeros_like(walkers.ovlp_perm, dtype=np.complex128)
+        active = np.abs(overlap) > zero_overlap_threshold
+        rho[active] = walkers.ovlp_perm[active] / overlap[active, None]
+
+        beta_perm_conj = np.asarray(
+            [self.beta_shift[perm].conj() for perm in self.perms],
+            dtype=np.complex128,
+        )
+        A = np.einsum("np,pm->nm", rho, beta_perm_conj)
+
+        B = np.zeros_like(A)
+        for ip, perm in enumerate(self.perms):
+            psia_perm = self.psia[perm, :]
+            B_perm = self._calc_ito_spin_log_derivative(
+                psia_perm, walkers.phia, g_tensor_residual_dagger
+            )
+            if self.ndown > 0:
+                psib_perm = self.psib[perm, :]
+                B_perm += self._calc_ito_spin_log_derivative(
+                    psib_perm, walkers.phib, g_tensor_residual_dagger
+                )
+            B += rho[:, ip, None] * B_perm
+
+        return A, B
+
+    @staticmethod
+    def _calc_ito_spin_log_derivative(
+        trial_orbitals: np.ndarray,
+        walker_orbitals: np.ndarray,
+        g_tensor_residual_dagger: np.ndarray,
+    ) -> np.ndarray:
+        if trial_orbitals.shape[1] == 0:
+            return np.zeros(
+                (walker_orbitals.shape[0], g_tensor_residual_dagger.shape[2]),
+                dtype=np.complex128,
+            )
+
+        overlap_matrix = np.einsum(
+            "ia,nie->nae", trial_orbitals.conj(), walker_orbitals
+        )
+        try:
+            inverse_overlap = np.linalg.inv(overlap_matrix)
+        except np.linalg.LinAlgError:
+            inverse_overlap = np.linalg.pinv(overlap_matrix)
+
+        generated_orbitals = np.einsum(
+            "ijm,nje->niem", g_tensor_residual_dagger, walker_orbitals
+        )
+        response_matrix = np.einsum(
+            "ia,niem->naem", trial_orbitals.conj(), generated_orbitals
+        )
+        return np.einsum("nab,nbam->nm", inverse_overlap, response_matrix)

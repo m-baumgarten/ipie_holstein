@@ -322,6 +322,12 @@ class FPAFQMC(AFQMC):
             self.walkers = psi
         self.setup_timers()
         eshift = 0.0
+        if importance_sampling and not getattr(
+            self.propagator, "supports_importance_sampling", False
+        ):
+            raise TypeError(
+                "importance_sampling=True requires an importance-sampled propagator."
+            )
         self.walkers.orthogonalise(free_projection=(not importance_sampling))
 
         self.get_env_info()
@@ -346,6 +352,7 @@ class FPAFQMC(AFQMC):
                     self.system.ndown,
                     self.hamiltonian.N,
                     self.params.num_walkers,
+                    self.mpi_handler,
                 )
             elif isinstance(self.trial, EPhTrialWavefunctionBase):
                 initial_walkers = EPhWalkersFP(
@@ -366,6 +373,8 @@ class FPAFQMC(AFQMC):
                 )
             initial_walkers.build(self.trial)
             self.walkers = initial_walkers
+            if importance_sampling:
+                self.propagator.initialize_importance_weights(self.walkers, self.trial)
 
             self.pcontrol = PopController(
                 self.params.num_walkers,

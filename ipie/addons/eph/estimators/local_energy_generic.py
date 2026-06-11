@@ -78,5 +78,5 @@ def local_energy_generic(
     energy[:, 2] = trial.calc_phonon_displacement(walkers, hamiltonian)
     energy[:, 3] = hamiltonian.w0 * trial.calc_harm_osc(walkers)
 
-    energy[:, 0] = np.sum(energy[:, 1:], axis=1).real
+    energy[:, 0] = np.sum(energy[:, 1:], axis=1)
     return energy

@@ -13,5 +13,10 @@
 # limitations under the License.
 
 from .ito_propagator_fp import EulerItoPropagatorFP
+from .ito_second_order_fp import ItoSymmSplitImportancePropagatorFP, ItoSymmSplitPropagatorFP
 
-__all__ = ["EulerItoPropagatorFP"]
+__all__ = [
+    "EulerItoPropagatorFP",
+    "ItoSymmSplitImportancePropagatorFP",
+    "ItoSymmSplitPropagatorFP",
+]

@@ -5,6 +5,13 @@ import pytest
 
 import ipie.addons.eph.estimators.energy as energy_module
 from ipie.addons.eph.estimators.energy import EnergyEstimator, EnergyEstimatorNoImportance
+from ipie.addons.eph.estimators.local_energy_generic import local_energy_generic
+from ipie.addons.eph.hamiltonians.holstein import HolsteinModel
+from ipie.addons.eph.trial_wavefunction.toyozawa_cs_unnormalized import (
+    ToyozawaTrialUnnormalizedCoherentState,
+)
+from ipie.addons.eph.walkers.cs_walkers import EPhCSWalkers
+from ipie.systems import Generic
 from ipie.addons.eph.utils.testing import gen_random_test_instances
 
 
@@ -71,6 +78,43 @@ def test_energy_estimator_no_importance_uses_complex_weighted_overlap(monkeypatc
     assert np.allclose(estimator["EElPh"], np.sum(mixed_weight * energy[:, 2]))
     assert np.allclose(estimator["EPh"], np.sum(mixed_weight * energy[:, 3]))
     assert not np.allclose(estimator["EDenom"], np.sum(walkers.weight * np.abs(ovlp)))
+
+
+@pytest.mark.unit
+def test_coherent_state_local_energy_preserves_complex_total():
+    nsites = 4
+    system = Generic((1, 0))
+    ham = HolsteinModel(g=0.8, t=0.7, w0=1.1, nsites=nsites, pbc=True)
+    ham.build()
+
+    beta = np.array([-0.4 + 0.1j, 0.2 - 0.05j, -0.1 + 0.2j, 0.15 + 0.03j])
+    orbital = np.array([0.8 + 0.1j, -0.2 + 0.4j, 0.3 - 0.15j, 0.1 + 0.2j])
+    orbital = orbital / np.linalg.norm(orbital)
+    wavefunction = np.column_stack([beta, orbital])
+
+    trial = ToyozawaTrialUnnormalizedCoherentState(
+        wavefunction=wavefunction,
+        w0=ham.w0,
+        num_elec=(1, 0),
+        num_basis=nsites,
+        K=0.0,
+    )
+    walkers = EPhCSWalkers(
+        initial_walker=wavefunction,
+        nup=1,
+        ndown=0,
+        nbasis=nsites,
+        nwalkers=2,
+    )
+    walkers.build(trial)
+    walkers.coherent_state_shift[0] += np.array([0.03j, -0.02j, 0.04j, -0.01j])
+    walkers.phia[0, :, 0] += np.array([0.02j, -0.03j, 0.01j, 0.04j])
+
+    energy = local_energy_generic(system, ham, walkers, trial)
+    component_sum = np.sum(energy[:, 1:], axis=1)
+
+    np.testing.assert_allclose(energy[:, 0], component_sum)
+    assert np.max(np.abs(component_sum.imag)) > 1e-8
 
 
 if __name__ == "__main__":
