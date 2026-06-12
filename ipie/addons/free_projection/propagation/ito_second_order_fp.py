@@ -17,6 +17,7 @@ import time
 import numpy
 
 from scipy.linalg import expm
+from ipie.propagation.operations import apply_exponential_batch_vectorized
 from ipie.utils.backend import synchronize
 from ipie.addons.free_projection.propagation.ito_propagator_fp import EulerItoPropagatorFP
 
@@ -31,8 +32,9 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         exp(-dt H_+) exp(-dt H_ann+el/2) exp(-dt H_ph/2).
 
     The stochastic creation factors are applied with the exact finite-step
-    exponential for the residual creation operator used by
-    :class:`EulerItoPropagatorFP`.
+    exponential by default. For small generator norms, the same action can be
+    approximated by a batched Taylor series without explicitly building the
+    matrix exponential.
     """
 
     def __init__(
@@ -42,7 +44,14 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         mean_field_subtraction=False,
         mean_field_shift=None,
         reference_energy=None,
+        exponential_action="expm",
+        exponential_taylor_order=6,
     ):
+        if exponential_action not in ("expm", "taylor"):
+            raise ValueError("exponential_action must be 'expm' or 'taylor'.")
+        exponential_taylor_order = int(exponential_taylor_order)
+        if exponential_taylor_order < 1:
+            raise ValueError("exponential_taylor_order must be positive.")
         super().__init__(
             time_step,
             verbose=verbose,
@@ -50,6 +59,8 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
             mean_field_shift=mean_field_shift,
             reference_energy=reference_energy,
         )
+        self.exponential_action = exponential_action
+        self.exponential_taylor_order = exponential_taylor_order
 
     def propagate(self, walkers, hamiltonian, trial) -> None:
         r"""Apply one symmetric split step with static mean-field subtraction."""
@@ -75,7 +86,15 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         if walkers.ndown > 0:
             walkers.phib = self.apply_exponential(walkers.phib, -step_size * h_eff[1])
 
-    def apply_creation_step(self, walkers, hamiltonian, step_size, dZ=None, delta_lambda=None):
+    def apply_creation_step(
+        self,
+        walkers,
+        hamiltonian,
+        step_size,
+        dZ=None,
+        delta_lambda=None,
+        dZ_creation=None,
+    ):
         if delta_lambda is None:
             delta_lambda = numpy.zeros(
                 (walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128
@@ -92,9 +111,13 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
             dZ = self.sample_complex_noise_with_step(walkers, hamiltonian, step_size)
         else:
             dZ = numpy.asarray(dZ, dtype=numpy.complex128)
+        if dZ_creation is None:
+            dZ_creation = dZ
+        else:
+            dZ_creation = numpy.asarray(dZ_creation, dtype=numpy.complex128)
 
         creation = self.construct_creation_matrix(
-            dZ, hamiltonian, delta_lambda=delta_lambda
+            dZ_creation, hamiltonian, delta_lambda=delta_lambda
         )
         walkers.coherent_state_shift += (
             -step_size * (self.eph_mean_field.conj() + delta_lambda)
@@ -107,7 +130,11 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         return dZ
 
     def apply_exponential(self, phi, generators):
-        r"""Apply ``expm(generators[iw])`` to each walker determinant."""
+        r"""Apply the configured exponential action to each walker determinant."""
+        if self.exponential_action == "taylor":
+            return apply_exponential_batch_vectorized(
+                phi.copy(), generators, self.exponential_taylor_order
+            )
         propagators = numpy.stack([expm(generator) for generator in generators])
         return numpy.einsum("nij,nje->nie", propagators, phi)
 
@@ -165,6 +192,9 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         split_gauge="static",
         split_gauge_scale=1.0,
         split_gauge_max_norm=None,
+        split_gauge_q=1.0,
+        exponential_action="expm",
+        exponential_taylor_order=6,
     ):
         if force_bias not in ("overlap", "zero"):
             raise ValueError("force_bias must be 'overlap' or 'zero'.")
@@ -172,12 +202,19 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             raise ValueError("split_gauge must be 'static' or 'phase_cancel'.")
         if not 0.0 <= float(split_gauge_scale) <= 1.0:
             raise ValueError("split_gauge_scale must be between 0 and 1.")
+        split_gauge_q = float(split_gauge_q)
+        if not numpy.isfinite(split_gauge_q) or split_gauge_q <= 0.0:
+            raise ValueError("split_gauge_q must be finite and positive.")
+        if split_gauge != "phase_cancel" and split_gauge_q != 1.0:
+            raise ValueError("split_gauge_q != 1 requires split_gauge='phase_cancel'.")
         super().__init__(
             time_step,
             verbose=verbose,
             mean_field_subtraction=mean_field_subtraction,
             mean_field_shift=mean_field_shift,
             reference_energy=reference_energy,
+            exponential_action=exponential_action,
+            exponential_taylor_order=exponential_taylor_order,
         )
         self.force_bias = force_bias
         self.force_bias_scale = float(force_bias_scale)
@@ -187,6 +224,8 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         self.split_gauge_max_norm = (
             None if split_gauge_max_norm is None else float(split_gauge_max_norm)
         )
+        self.split_gauge_q = split_gauge_q
+        self.split_gauge_sqrt_q = numpy.sqrt(self.split_gauge_q)
         if self.split_gauge_max_norm is not None and self.split_gauge_max_norm < 0.0:
             raise ValueError("split_gauge_max_norm must be non-negative.")
 
@@ -222,7 +261,7 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         self.apply_phonon_damping(walkers, hamiltonian, 0.5 * self.dt)
         self.apply_annihilation_step(walkers, hamiltonian, 0.5 * self.dt)
 
-        dZ, log_likelihood, delta_lambda = self.sample_biased_complex_noise(
+        dZ, dZ_creation, log_likelihood, delta_lambda = self.sample_biased_complex_noise(
             walkers, hamiltonian, trial, self.dt
         )
         self.apply_creation_step(
@@ -231,6 +270,7 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             self.dt,
             dZ=dZ,
             delta_lambda=delta_lambda,
+            dZ_creation=dZ_creation,
         )
 
         self.apply_annihilation_step(walkers, hamiltonian, 0.5 * self.dt)
@@ -246,21 +286,30 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         if self.creation_coefficients_are_zero(delta_lambda):
             dZ = numpy.zeros((walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128)
             log_likelihood = numpy.zeros(walkers.nwalkers, dtype=numpy.float64)
-            return dZ, log_likelihood, delta_lambda
+            return dZ, dZ, log_likelihood, delta_lambda
 
         dW = self.sample_complex_noise_with_step(walkers, hamiltonian, step_size)
-        drift = self.construct_force_bias(walkers, hamiltonian, trial, A=A, B=B)
-        dZ = drift * step_size + dW
+        drift = self.construct_force_bias(
+            walkers,
+            hamiltonian,
+            trial,
+            A=A,
+            B=B,
+            noise_scale=self.split_gauge_sqrt_q,
+        )
+        dZ_base = drift * step_size + dW
+        dZ = self.split_gauge_sqrt_q * dZ_base
+        dZ_creation = dZ_base / self.split_gauge_sqrt_q
         log_likelihood = self.gaussian_log_likelihood_ratio(drift, dW, step_size)
-        return dZ, log_likelihood, delta_lambda
+        return dZ, dZ_creation, log_likelihood, delta_lambda
 
     def construct_split_gauge(self, walkers, hamiltonian, trial):
         zeros = numpy.zeros((walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128)
-        if self.split_gauge == "static" or self.split_gauge_scale == 0.0:
+        if self.split_gauge == "static":
             return zeros, None, None
 
         A, B = self.construct_ito_log_derivatives(walkers, trial)
-        delta_lambda = self.split_gauge_scale * (B + A.conj())
+        delta_lambda = self.split_gauge_scale * (B + self.split_gauge_q * A.conj())
         delta_lambda = self.apply_split_gauge_bound(delta_lambda)
         B_gauged = B - delta_lambda
         return delta_lambda, A, B_gauged
@@ -291,11 +340,13 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             delta_lambda[active] *= scale[:, None]
         return delta_lambda
 
-    def construct_force_bias(self, walkers, hamiltonian, trial, A=None, B=None):
+    def construct_force_bias(
+        self, walkers, hamiltonian, trial, A=None, B=None, noise_scale=1.0
+    ):
         if self.force_bias == "zero" or self.force_bias_scale == 0.0:
             return numpy.zeros((walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128)
         if A is not None and B is not None:
-            drift = 0.5 * (A.conj() - B)
+            drift = 0.5 * (noise_scale * A.conj() - B / noise_scale)
             return self.force_bias_scale * numpy.asarray(drift, dtype=numpy.complex128)
 
         if hasattr(trial, "calc_ito_log_derivatives"):

@@ -95,6 +95,22 @@ def test_ito_symm_importance_gaussian_log_likelihood_ratio():
 
 
 @pytest.mark.unit
+def test_ito_symm_importance_split_gauge_q_validation():
+    with pytest.raises(ValueError, match="finite and positive"):
+        ItoSymmSplitImportancePropagatorFP(
+            0.01, split_gauge="phase_cancel", split_gauge_q=0.0
+        )
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        ItoSymmSplitImportancePropagatorFP(
+            0.01, split_gauge="phase_cancel", split_gauge_q=np.inf
+        )
+
+    with pytest.raises(ValueError, match="requires split_gauge='phase_cancel'"):
+        ItoSymmSplitImportancePropagatorFP(0.01, split_gauge_q=0.5)
+
+
+@pytest.mark.unit
 def test_ito_symm_importance_update_weight_splits_overlap_ratio_and_phase():
     class Walkers:
         pass
@@ -508,9 +524,138 @@ def test_ito_symm_phase_cancel_split_gauge_sets_adjusted_B_and_drift():
     )
     prop.build(ham, trial=trial, walkers=walkers)
 
+    assert prop.split_gauge_q == 1.0
     delta_lambda, A_out, B_gauged = prop.construct_split_gauge(walkers, ham, trial)
     drift = prop.construct_force_bias(walkers, ham, trial, A=A_out, B=B_gauged)
 
     np.testing.assert_allclose(delta_lambda, B + A.conj())
     np.testing.assert_allclose(B_gauged, -A.conj())
     np.testing.assert_allclose(drift, A.conj())
+
+
+@pytest.mark.unit
+def test_ito_symm_phase_cancel_scalar_q_sets_adjusted_B_and_base_drift():
+    nsites = 3
+    nwalkers = 2
+    q = 0.25
+    ham = HolsteinModel(g=0.7, t=0.2, w0=1.3, nsites=nsites, pbc=False)
+    ham.build()
+
+    alpha = np.array([0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j])
+    phia = np.array([1.0, -0.5j, 0.25], dtype=np.complex128)[:, None]
+    walkers = EPhCSWalkers(
+        np.column_stack([alpha, phia]), nup=1, ndown=0, nbasis=nsites, nwalkers=nwalkers
+    )
+
+    A = np.array(
+        [[0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j],
+         [0.1 - 0.2j, 0.4 + 0.3j, -0.2 + 0.6j]],
+        dtype=np.complex128,
+    )
+    B = np.array(
+        [[-0.1 + 0.3j, 0.2 - 0.5j, 0.7 + 0.1j],
+         [0.3 + 0.2j, -0.6 + 0.1j, 0.2 - 0.4j]],
+        dtype=np.complex128,
+    )
+    trial = _GaugeDerivativeTrial(A, B)
+
+    prop = ItoSymmSplitImportancePropagatorFP(
+        0.01,
+        mean_field_shift=np.zeros(nsites),
+        split_gauge="phase_cancel",
+        split_gauge_q=q,
+    )
+    prop.build(ham, trial=trial, walkers=walkers)
+
+    delta_lambda, A_out, B_gauged = prop.construct_split_gauge(walkers, ham, trial)
+    drift = prop.construct_force_bias(
+        walkers, ham, trial, A=A_out, B=B_gauged, noise_scale=prop.split_gauge_sqrt_q
+    )
+
+    np.testing.assert_allclose(delta_lambda, B + q * A.conj())
+    np.testing.assert_allclose(B_gauged, -q * A.conj())
+    np.testing.assert_allclose(drift, np.sqrt(q) * A.conj())
+
+
+@pytest.mark.unit
+def test_ito_symm_phase_cancel_scalar_q_uses_base_noise_for_creation(monkeypatch):
+    nsites = 3
+    nwalkers = 2
+    dt = 0.04
+    q = 0.25
+    ham = HolsteinModel(g=0.7, t=0.2, w0=1.3, nsites=nsites, pbc=False)
+    ham.build()
+
+    alpha = np.array([0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j])
+    phia = np.array([1.0, -0.5j, 0.25], dtype=np.complex128)[:, None]
+    walkers = EPhCSWalkers(
+        np.column_stack([alpha, phia]), nup=1, ndown=0, nbasis=nsites, nwalkers=nwalkers
+    )
+
+    A = np.array(
+        [[0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j],
+         [0.1 - 0.2j, 0.4 + 0.3j, -0.2 + 0.6j]],
+        dtype=np.complex128,
+    )
+    B = np.array(
+        [[-0.1 + 0.3j, 0.2 - 0.5j, 0.7 + 0.1j],
+         [0.3 + 0.2j, -0.6 + 0.1j, 0.2 - 0.4j]],
+        dtype=np.complex128,
+    )
+    trial = _GaugeDerivativeTrial(A, B)
+    prop = ItoSymmSplitImportancePropagatorFP(
+        dt,
+        mean_field_shift=np.zeros(nsites),
+        split_gauge="phase_cancel",
+        split_gauge_q=q,
+    )
+    prop.build(ham, trial=trial, walkers=walkers)
+
+    dW = np.array(
+        [[0.01 - 0.02j, -0.03 + 0.04j, 0.02 + 0.01j],
+         [0.05 + 0.02j, -0.01 - 0.03j, 0.04 - 0.02j]],
+        dtype=np.complex128,
+    )
+    calls = []
+
+    def fake_noise(walkers_arg, hamiltonian_arg, step_size):
+        assert walkers_arg is walkers
+        assert hamiltonian_arg is ham
+        calls.append(step_size)
+        return dW.copy()
+
+    monkeypatch.setattr(prop, "sample_complex_noise_with_step", fake_noise)
+
+    alpha_before = walkers.coherent_state_shift.copy()
+    phia_before = walkers.phia.copy()
+    log_likelihood = prop.propagate(walkers, ham, trial)
+
+    half_damp = np.exp(-0.5 * dt * ham.w0)
+    alpha_1 = half_damp * alpha_before
+    h_eff_1 = ham.T[0][None, :, :] + np.einsum("ijk,nk->nij", ham.g_tensor, alpha_1)
+    phia_1 = _batch_expm_apply(-0.5 * dt * h_eff_1, phia_before)
+
+    sqrt_q = np.sqrt(q)
+    delta_lambda = B + q * A.conj()
+    drift = sqrt_q * A.conj()
+    dZ_base = drift * dt + dW
+    dZ = sqrt_q * dZ_base
+    dZ_creation = dZ_base / sqrt_q
+
+    creation = np.einsum(
+        "ijk,nk->nij", prop.g_tensor_residual_dagger, dZ_creation.conj()
+    )
+    scalar_shift = np.einsum("nm,nm->n", delta_lambda, dZ_creation.conj())
+    creation -= scalar_shift[:, None, None] * np.eye(nsites)[None, :, :]
+    alpha_2 = alpha_1 - dt * delta_lambda + dZ
+    phia_2 = _batch_expm_apply(-creation, phia_1)
+
+    h_eff_2 = ham.T[0][None, :, :] + np.einsum("ijk,nk->nij", ham.g_tensor, alpha_2)
+    expected_phia = _batch_expm_apply(-0.5 * dt * h_eff_2, phia_2)
+    expected_alpha = half_damp * alpha_2
+    expected_log_likelihood = prop.gaussian_log_likelihood_ratio(drift, dW, dt)
+
+    assert calls == [dt]
+    np.testing.assert_allclose(walkers.coherent_state_shift, expected_alpha)
+    np.testing.assert_allclose(walkers.phia, expected_phia)
+    np.testing.assert_allclose(log_likelihood, expected_log_likelihood)

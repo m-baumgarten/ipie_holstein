@@ -116,6 +116,9 @@ def build_workflow(
     split_gauge: str = "static",
     split_gauge_scale: float = 1.0,
     split_gauge_max_norm: float = None,
+    split_gauge_q: float = 1.0,
+    exponential_action: str = "expm",
+    exponential_taylor_order: int = 6,
     mpi_handler=None,
 ):
     """Construct the free-projection Ito coherent-state Holstein pipeline."""
@@ -157,12 +160,17 @@ def build_workflow(
             split_gauge=split_gauge,
             split_gauge_scale=split_gauge_scale,
             split_gauge_max_norm=split_gauge_max_norm,
+            split_gauge_q=split_gauge_q,
+            exponential_action=exponential_action,
+            exponential_taylor_order=exponential_taylor_order,
         )
     else:
         propagator = ItoSymmSplitPropagatorFP(
             time_step=timestep,
             mean_field_subtraction=True,
             reference_energy=reference_energy,
+            exponential_action=exponential_action,
+            exponential_taylor_order=exponential_taylor_order,
         )
     propagator.build(ham, trial, walkers, mpi_handler=mpi_handler)
     return system, ham, trial, walkers, propagator

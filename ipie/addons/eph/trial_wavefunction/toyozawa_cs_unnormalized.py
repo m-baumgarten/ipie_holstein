@@ -38,6 +38,10 @@ class ToyozawaTrialUnnormalizedCoherentState(ToyozawaTrialCoherentState):
     ):
         super().__init__(wavefunction, w0, num_elec, num_basis, K, verbose=verbose)
         self.coherent_state_convention = "unnormalized"
+        self._beta_perm_conj = np.asarray(
+            [self.beta_shift[perm].conj() for perm in self.perms],
+            dtype=np.complex128,
+        )
 
     def calc_energy(self, ham, zero_th=1e-12):
         r"""Computes the variational energy of the trial, i.e.
@@ -165,11 +169,7 @@ class ToyozawaTrialUnnormalizedCoherentState(ToyozawaTrialCoherentState):
         active = np.abs(overlap) > zero_overlap_threshold
         rho[active] = walkers.ovlp_perm[active] / overlap[active, None]
 
-        beta_perm_conj = np.asarray(
-            [self.beta_shift[perm].conj() for perm in self.perms],
-            dtype=np.complex128,
-        )
-        A = np.einsum("np,pm->nm", rho, beta_perm_conj)
+        A = np.einsum("np,pm->nm", rho, self._beta_perm_conj)
 
         B = np.zeros_like(A)
         for ip, perm in enumerate(self.perms):

@@ -116,6 +116,24 @@ def parse_args():
         help="Optional per-walker L2 cap for the dynamic split gauge.",
     )
     parser.add_argument(
+        "--split-gauge-q",
+        type=float,
+        default=1.0,
+        help="Global scalar Q gauge for phase-cancel importance sampling.",
+    )
+    parser.add_argument(
+        "--exponential-action",
+        choices=("expm", "taylor"),
+        default="expm",
+        help="How to apply per-walker matrix exponentials in the symmetric split.",
+    )
+    parser.add_argument(
+        "--exponential-taylor-order",
+        type=int,
+        default=6,
+        help="Taylor order used when --exponential-action=taylor.",
+    )
+    parser.add_argument(
         "--reference-energy",
         type=float,
         default=None,
@@ -201,6 +219,9 @@ def main():
             split_gauge=args.split_gauge,
             split_gauge_scale=args.split_gauge_scale,
             split_gauge_max_norm=args.split_gauge_max_norm,
+            split_gauge_q=args.split_gauge_q,
+            exponential_action=args.exponential_action,
+            exponential_taylor_order=args.exponential_taylor_order,
             mpi_handler=mpi_handler,
         )
         trial_total_energy = trial.calc_energy(ham)[0]
@@ -225,6 +246,10 @@ def main():
                 print(f"# split gauge = {args.split_gauge}")
                 print(f"# split gauge scale = {args.split_gauge_scale}")
                 print(f"# split gauge max norm = {args.split_gauge_max_norm}")
+                print(f"# split gauge q = {args.split_gauge_q}")
+            print(f"# exponential action = {args.exponential_action}")
+            if args.exponential_action == "taylor":
+                print(f"# exponential Taylor order = {args.exponential_taylor_order}")
             print(f"# nsites = {args.nsites}")
             print(f"# t = {args.t}")
             print(f"# g = {args.g}")

@@ -114,3 +114,17 @@ def apply_exponential_batch(phi, VHS, exp_nmax):
     synchronize()
 
     return phi
+
+
+def apply_exponential_batch_vectorized(phi, VHS, exp_nmax):
+    """Apply a Taylor exponential action with batched matrix products."""
+    Temp = xp.zeros(phi.shape, dtype=phi.dtype)
+
+    xp.copyto(Temp, phi)
+    for n in range(1, exp_nmax + 1):
+        Temp = xp.matmul(VHS, Temp) / n
+        phi += Temp
+
+    synchronize()
+
+    return phi
