@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pathlib import Path
 import time
 
 import numpy
@@ -61,6 +62,344 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         )
         self.exponential_action = exponential_action
         self.exponential_taylor_order = exponential_taylor_order
+        self.diagnostics_enabled = False
+        self._diagnostic_filename = None
+        self._diagnostic_stride = 1
+        self._diagnostic_max_records = None
+        self._diagnostic_steps_per_block = None
+        self._diagnostic_rank = 0
+        self._diagnostic_size = 1
+        self._diagnostic_step = 0
+        self._diagnostic_records = []
+        self._diagnostic_current = None
+        self._diagnostic_failure = {}
+        self._diagnostic_last_arrays = {}
+        self._diagnostic_annihilation_count = 0
+
+    def configure_diagnostics(
+        self,
+        filename=None,
+        mpi_handler=None,
+        stride=1,
+        max_records=None,
+        steps_per_block=None,
+    ):
+        r"""Enable compact per-step diagnostics for unstable importance runs."""
+        if filename is None:
+            self.diagnostics_enabled = False
+            self._diagnostic_filename = None
+            return None
+
+        stride = int(stride)
+        if stride < 1:
+            raise ValueError("diagnostics stride must be positive.")
+        if max_records is not None:
+            max_records = int(max_records)
+            if max_records < 1:
+                raise ValueError("diagnostics max records must be positive.")
+
+        rank = 0
+        size = 1
+        if mpi_handler is not None and hasattr(mpi_handler, "comm"):
+            comm = mpi_handler.comm
+            rank = getattr(comm, "rank", None)
+            if rank is None:
+                rank = comm.Get_rank()
+            size = getattr(comm, "size", None)
+            if size is None:
+                size = comm.Get_size()
+
+        path = Path(filename)
+        if size > 1:
+            path = path.with_name(f"{path.stem}.rank{rank:04d}{path.suffix}")
+
+        self.diagnostics_enabled = True
+        self._diagnostic_filename = path
+        self._diagnostic_stride = stride
+        self._diagnostic_max_records = max_records
+        self._diagnostic_steps_per_block = (
+            None if steps_per_block is None else int(steps_per_block)
+        )
+        self._diagnostic_rank = int(rank)
+        self._diagnostic_size = int(size)
+        self._diagnostic_records = []
+        self._diagnostic_current = None
+        self._diagnostic_failure = {}
+        self._diagnostic_last_arrays = {}
+        self._diagnostic_step = 0
+        return path
+
+    def save_diagnostics(self, reason="manual"):
+        if not self.diagnostics_enabled or self._diagnostic_filename is None:
+            return None
+
+        fields = self._diagnostic_fields()
+        records = numpy.full(
+            (len(self._diagnostic_records), len(fields)), numpy.nan, dtype=numpy.float64
+        )
+        for irec, record in enumerate(self._diagnostic_records):
+            for ifield, field in enumerate(fields):
+                if field in record:
+                    records[irec, ifield] = record[field]
+
+        arrays = {
+            "fields": numpy.asarray(fields, dtype="<U96"),
+            "records": records,
+            "save_reason": numpy.asarray(str(reason)),
+            "failure_stage": numpy.asarray(str(self._diagnostic_failure.get("stage", ""))),
+            "failure_exception": numpy.asarray(
+                str(self._diagnostic_failure.get("exception", ""))
+            ),
+            "failure_step": numpy.asarray(
+                self._diagnostic_failure.get("step", -1), dtype=numpy.int64
+            ),
+            "failure_walker_index": numpy.asarray(
+                self._diagnostic_failure.get("walker_index", -1), dtype=numpy.int64
+            ),
+            "rank": numpy.asarray(self._diagnostic_rank, dtype=numpy.int64),
+            "size": numpy.asarray(self._diagnostic_size, dtype=numpy.int64),
+        }
+        arrays.update(self._diagnostic_last_arrays)
+
+        path = Path(self._diagnostic_filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        numpy.savez(path, **arrays)
+        return path
+
+    def _diagnostic_fields(self):
+        preferred = [
+            "rank",
+            "absolute_step",
+            "block",
+            "step_in_block",
+            "old_overlap_min_abs",
+            "old_overlap_max_abs",
+            "new_overlap_min_abs",
+            "new_overlap_max_abs",
+            "log_likelihood_min",
+            "log_likelihood_max",
+            "overlap_ratio_log_min",
+            "overlap_ratio_log_max",
+            "weight_increment_log_min",
+            "weight_increment_log_max",
+            "final_weight_log_min",
+            "final_weight_log_max",
+            "final_weight_log_spread",
+            "final_raw_weight_max_abs",
+            "final_phase_resultant",
+            "final_coherent_shift_max_norm",
+        ]
+        keys = set(preferred)
+        for record in self._diagnostic_records:
+            keys.update(record)
+        return [key for key in preferred if key in keys] + sorted(keys - set(preferred))
+
+    def _diagnostic_begin_step(self, walkers):
+        if not self.diagnostics_enabled:
+            return None
+        self._diagnostic_current = None
+        self._diagnostic_annihilation_count = 0
+        if self._diagnostic_step % self._diagnostic_stride != 0:
+            return None
+        if (
+            self._diagnostic_max_records is not None
+            and len(self._diagnostic_records) >= self._diagnostic_max_records
+        ):
+            return None
+
+        record = {
+            "rank": float(self._diagnostic_rank),
+            "absolute_step": float(self._diagnostic_step),
+        }
+        if self._diagnostic_steps_per_block is not None:
+            record["block"] = float(self._diagnostic_step // self._diagnostic_steps_per_block)
+            record["step_in_block"] = float(
+                self._diagnostic_step % self._diagnostic_steps_per_block
+            )
+        self._diagnostic_current = record
+        self._diagnostic_record_walker_state("initial", walkers)
+        self._diagnostic_check_finite("initial", walkers)
+        return None
+
+    def _diagnostic_finish_step(self, walkers):
+        if not self.diagnostics_enabled:
+            return None
+        self._diagnostic_record_walker_state("final", walkers)
+        self._diagnostic_check_finite("final", walkers)
+        if self._diagnostic_current is not None:
+            self._diagnostic_records.append(self._diagnostic_current)
+            self._diagnostic_current = None
+            self.save_diagnostics(reason="step")
+        self._diagnostic_step += 1
+        return None
+
+    def _diagnostic_record_array(self, prefix, values):
+        if not self.diagnostics_enabled or self._diagnostic_current is None:
+            return None
+        if values is None:
+            return None
+        array = numpy.asarray(values)
+        if array.size == 0:
+            return None
+        finite = numpy.isfinite(array)
+        self._diagnostic_current[f"{prefix}_finite_fraction"] = float(
+            numpy.count_nonzero(finite) / finite.size
+        )
+        abs_values = numpy.abs(array)
+        finite_abs = numpy.isfinite(abs_values)
+        if numpy.any(finite_abs):
+            self._diagnostic_current[f"{prefix}_mean_abs"] = float(
+                numpy.mean(abs_values[finite_abs])
+            )
+            self._diagnostic_current[f"{prefix}_max_abs"] = float(
+                numpy.max(abs_values[finite_abs])
+            )
+            self._diagnostic_current[f"{prefix}_min_abs"] = float(
+                numpy.min(abs_values[finite_abs])
+            )
+        if array.ndim >= 2:
+            norms = numpy.linalg.norm(array.reshape(array.shape[0], -1), axis=1)
+        else:
+            norms = abs_values.reshape(-1)
+        finite_norms = numpy.isfinite(norms)
+        if numpy.any(finite_norms):
+            self._diagnostic_current[f"{prefix}_mean_norm"] = float(
+                numpy.mean(norms[finite_norms])
+            )
+            self._diagnostic_current[f"{prefix}_max_norm"] = float(
+                numpy.max(norms[finite_norms])
+            )
+            self._diagnostic_current[f"{prefix}_argmax_norm"] = float(
+                numpy.argmax(numpy.where(finite_norms, norms, -numpy.inf))
+            )
+        return None
+
+    def _diagnostic_record_real(self, prefix, values):
+        if not self.diagnostics_enabled or self._diagnostic_current is None:
+            return None
+        array = numpy.asarray(values, dtype=numpy.float64)
+        if array.size == 0:
+            return None
+        finite = numpy.isfinite(array)
+        self._diagnostic_current[f"{prefix}_finite_fraction"] = float(
+            numpy.count_nonzero(finite) / finite.size
+        )
+        if numpy.any(finite):
+            self._diagnostic_current[f"{prefix}_min"] = float(numpy.min(array[finite]))
+            self._diagnostic_current[f"{prefix}_max"] = float(numpy.max(array[finite]))
+            self._diagnostic_current[f"{prefix}_mean"] = float(numpy.mean(array[finite]))
+        return None
+
+    def _diagnostic_record_matrix(self, prefix, matrices):
+        if not self.diagnostics_enabled or self._diagnostic_current is None:
+            return None
+        mats = numpy.asarray(matrices)
+        self._diagnostic_record_array(prefix, mats)
+        if mats.ndim != 3:
+            return None
+        max_real_eigs = numpy.full(mats.shape[0], numpy.nan, dtype=numpy.float64)
+        for iw, matrix in enumerate(mats):
+            if numpy.all(numpy.isfinite(matrix)):
+                try:
+                    max_real_eigs[iw] = numpy.max(numpy.linalg.eigvals(matrix).real)
+                except numpy.linalg.LinAlgError:
+                    pass
+        finite = numpy.isfinite(max_real_eigs)
+        if numpy.any(finite):
+            self._diagnostic_current[f"{prefix}_max_real_eig"] = float(
+                numpy.max(max_real_eigs[finite])
+            )
+            self._diagnostic_current[f"{prefix}_mean_max_real_eig"] = float(
+                numpy.mean(max_real_eigs[finite])
+            )
+            self._diagnostic_current[f"{prefix}_argmax_real_eig"] = float(
+                numpy.argmax(numpy.where(finite, max_real_eigs, -numpy.inf))
+            )
+        return None
+
+    def _diagnostic_record_walker_state(self, prefix, walkers):
+        self._diagnostic_record_array(f"{prefix}_coherent_shift", walkers.coherent_state_shift)
+        self._diagnostic_record_array(f"{prefix}_phia", walkers.phia)
+        if getattr(walkers, "ndown", 0) > 0:
+            self._diagnostic_record_array(f"{prefix}_phib", walkers.phib)
+        if hasattr(walkers, "weight"):
+            self._diagnostic_record_array(f"{prefix}_raw_weight", walkers.weight)
+        if hasattr(walkers, "weight_log"):
+            weight_log = numpy.asarray(walkers.weight_log, dtype=numpy.complex128)
+            real_log = weight_log.real
+            self._diagnostic_record_real(f"{prefix}_weight_log", real_log)
+            finite = numpy.isfinite(real_log)
+            if self._diagnostic_current is not None and numpy.any(finite):
+                self._diagnostic_current[f"{prefix}_weight_log_spread"] = float(
+                    numpy.max(real_log[finite]) - numpy.min(real_log[finite])
+                )
+        if hasattr(walkers, "phase"):
+            phase = numpy.asarray(walkers.phase)
+            active = numpy.isfinite(phase) & (numpy.abs(phase) > 0.0)
+            if self._diagnostic_current is not None and numpy.any(active):
+                unit_phase = phase[active] / numpy.abs(phase[active])
+                self._diagnostic_current[f"{prefix}_phase_resultant"] = float(
+                    numpy.abs(numpy.mean(unit_phase))
+                )
+        if hasattr(walkers, "ovlp"):
+            self._diagnostic_record_array(f"{prefix}_overlap", walkers.ovlp)
+        return None
+
+    def _diagnostic_check_finite(self, stage, walkers):
+        if not self.diagnostics_enabled or self._diagnostic_failure:
+            return None
+        walker_index = self._diagnostic_first_nonfinite_walker(walkers)
+        if walker_index is not None:
+            self._diagnostic_record_failure(stage, None, walkers, walker_index)
+        return None
+
+    def _diagnostic_first_nonfinite_walker(self, walkers):
+        for name in ("coherent_state_shift", "phia", "phib", "weight", "phase", "weight_log", "ovlp"):
+            if not hasattr(walkers, name):
+                continue
+            array = numpy.asarray(getattr(walkers, name))
+            if array.size == 0:
+                continue
+            finite = numpy.isfinite(array)
+            if not numpy.all(finite):
+                if array.ndim == 0:
+                    return 0
+                per_walker = finite.reshape(array.shape[0], -1)
+                bad = numpy.where(~numpy.all(per_walker, axis=1))[0]
+                if bad.size > 0:
+                    return int(bad[0])
+        return None
+
+    def _diagnostic_record_failure(self, stage, exc=None, walkers=None, walker_index=None):
+        if not self.diagnostics_enabled or self._diagnostic_failure:
+            return None
+        if walker_index is None and walkers is not None:
+            walker_index = self._diagnostic_first_nonfinite_walker(walkers)
+        self._diagnostic_failure = {
+            "stage": stage,
+            "exception": "" if exc is None else repr(exc),
+            "step": int(self._diagnostic_step),
+            "walker_index": -1 if walker_index is None else int(walker_index),
+        }
+        if walkers is not None:
+            self._diagnostic_last_arrays.update(
+                {
+                    "failure_coherent_state_shift": numpy.asarray(
+                        walkers.coherent_state_shift
+                    ).copy(),
+                    "failure_phia": numpy.asarray(walkers.phia).copy(),
+                }
+            )
+            for name in ("phib", "weight", "phase", "weight_log", "ovlp"):
+                if hasattr(walkers, name):
+                    self._diagnostic_last_arrays[f"failure_{name}"] = numpy.asarray(
+                        getattr(walkers, name)
+                    ).copy()
+        if self._diagnostic_current is not None:
+            self._diagnostic_records.append(self._diagnostic_current)
+            self._diagnostic_current = None
+        self.save_diagnostics(reason="failure")
+        return None
 
     def propagate(self, walkers, hamiltonian, trial) -> None:
         r"""Apply one symmetric split step with static mean-field subtraction."""
@@ -82,6 +421,15 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         h_eff = self.construct_annihilation_matrix(
             walkers.coherent_state_shift, hamiltonian
         )
+        step_index = self._diagnostic_annihilation_count
+        self._diagnostic_record_matrix(
+            f"annihilation_{step_index}_up_generator", -step_size * h_eff[0]
+        )
+        if walkers.ndown > 0:
+            self._diagnostic_record_matrix(
+                f"annihilation_{step_index}_down_generator", -step_size * h_eff[1]
+            )
+        self._diagnostic_annihilation_count += 1
         walkers.phia = self.apply_exponential(walkers.phia, -step_size * h_eff[0])
         if walkers.ndown > 0:
             walkers.phib = self.apply_exponential(walkers.phib, -step_size * h_eff[1])
@@ -119,6 +467,19 @@ class ItoSymmSplitPropagatorFP(EulerItoPropagatorFP):
         creation = self.construct_creation_matrix(
             dZ_creation, hamiltonian, delta_lambda=delta_lambda
         )
+        self._diagnostic_record_array("dZ", dZ)
+        self._diagnostic_record_array("dZ_creation", dZ_creation)
+        self._diagnostic_record_array("delta_lambda", delta_lambda)
+        self._diagnostic_record_matrix("creation_generator", -creation)
+        if self.diagnostics_enabled:
+            self._diagnostic_last_arrays.update(
+                {
+                    "last_delta_lambda": delta_lambda.copy(),
+                    "last_dZ": dZ.copy(),
+                    "last_dZ_creation": dZ_creation.copy(),
+                    "last_creation_generator": (-creation).copy(),
+                }
+            )
         walkers.coherent_state_shift += (
             -step_size * (self.eph_mean_field.conj() + delta_lambda)
             + dZ
@@ -230,36 +591,49 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             raise ValueError("split_gauge_max_norm must be non-negative.")
 
     def propagate_walkers(self, walkers, hamiltonian, trial, eshift=None) -> None:
-        start_time = time.time()
-        ovlp = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp
-        synchronize()
-        self.timer.tovlp += time.time() - start_time
+        self._diagnostic_begin_step(walkers)
+        try:
+            start_time = time.time()
+            ovlp = trial.calc_overlap(walkers)
+            walkers.ovlp = ovlp
+            self._diagnostic_record_array("old_overlap", ovlp)
+            self._diagnostic_check_finite("old_overlap", walkers)
+            synchronize()
+            self.timer.tovlp += time.time() - start_time
 
-        log_likelihood = self.propagate(walkers, hamiltonian, trial)
+            log_likelihood = self.propagate(walkers, hamiltonian, trial)
 
-        start_time = time.time()
-        ovlp_new = trial.calc_overlap(walkers)
-        walkers.ovlp = ovlp_new
-        synchronize()
-        self.timer.tovlp += time.time() - start_time
+            start_time = time.time()
+            ovlp_new = trial.calc_overlap(walkers)
+            walkers.ovlp = ovlp_new
+            self._diagnostic_record_array("new_overlap", ovlp_new)
+            self._diagnostic_check_finite("new_overlap", walkers)
+            synchronize()
+            self.timer.tovlp += time.time() - start_time
 
-        start_time = time.time()
-        self.update_weight(
-            walkers,
-            ovlp=ovlp,
-            ovlp_new=ovlp_new,
-            log_likelihood=log_likelihood,
-            eshift=eshift,
-        )
-        synchronize()
-        self.timer.tupdate += time.time() - start_time
+            start_time = time.time()
+            self.update_weight(
+                walkers,
+                ovlp=ovlp,
+                ovlp_new=ovlp_new,
+                log_likelihood=log_likelihood,
+                eshift=eshift,
+            )
+            self._diagnostic_check_finite("weight_update", walkers)
+            synchronize()
+            self.timer.tupdate += time.time() - start_time
+            self._diagnostic_finish_step(walkers)
+        except Exception as exc:
+            self._diagnostic_record_failure("propagate_walkers_exception", exc, walkers)
+            raise
 
     def propagate(self, walkers, hamiltonian, trial):
         r"""Apply one importance-sampled symmetric split step."""
         start_time = time.time()
         self.apply_phonon_damping(walkers, hamiltonian, 0.5 * self.dt)
+        self._diagnostic_check_finite("after_first_phonon_half", walkers)
         self.apply_annihilation_step(walkers, hamiltonian, 0.5 * self.dt)
+        self._diagnostic_check_finite("after_first_annihilation_half", walkers)
 
         dZ, dZ_creation, log_likelihood, delta_lambda = self.sample_biased_complex_noise(
             walkers, hamiltonian, trial, self.dt
@@ -272,9 +646,12 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             delta_lambda=delta_lambda,
             dZ_creation=dZ_creation,
         )
+        self._diagnostic_check_finite("after_creation", walkers)
 
         self.apply_annihilation_step(walkers, hamiltonian, 0.5 * self.dt)
+        self._diagnostic_check_finite("after_second_annihilation_half", walkers)
         self.apply_phonon_damping(walkers, hamiltonian, 0.5 * self.dt)
+        self._diagnostic_check_finite("after_second_phonon_half", walkers)
 
         synchronize()
         self.timer.tgemm += time.time() - start_time
@@ -286,6 +663,9 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         if self.creation_coefficients_are_zero(delta_lambda):
             dZ = numpy.zeros((walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128)
             log_likelihood = numpy.zeros(walkers.nwalkers, dtype=numpy.float64)
+            self._diagnostic_record_array("dZ", dZ)
+            self._diagnostic_record_array("dZ_creation", dZ)
+            self._diagnostic_record_real("log_likelihood", log_likelihood)
             return dZ, dZ, log_likelihood, delta_lambda
 
         dW = self.sample_complex_noise_with_step(walkers, hamiltonian, step_size)
@@ -301,17 +681,46 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         dZ = self.split_gauge_sqrt_q * dZ_base
         dZ_creation = dZ_base / self.split_gauge_sqrt_q
         log_likelihood = self.gaussian_log_likelihood_ratio(drift, dW, step_size)
+        self._diagnostic_record_array("drift", drift)
+        self._diagnostic_record_array("dW", dW)
+        self._diagnostic_record_array("dZ_base", dZ_base)
+        self._diagnostic_record_array("dZ", dZ)
+        self._diagnostic_record_array("dZ_creation", dZ_creation)
+        self._diagnostic_record_real("log_likelihood", log_likelihood)
+        if self.diagnostics_enabled:
+            self._diagnostic_last_arrays.update(
+                {
+                    "last_drift": drift.copy(),
+                    "last_dW": dW.copy(),
+                    "last_dZ_base": dZ_base.copy(),
+                    "last_log_likelihood": log_likelihood.copy(),
+                }
+            )
         return dZ, dZ_creation, log_likelihood, delta_lambda
 
     def construct_split_gauge(self, walkers, hamiltonian, trial):
         zeros = numpy.zeros((walkers.nwalkers, hamiltonian.N), dtype=numpy.complex128)
         if self.split_gauge == "static":
+            self._diagnostic_record_array("delta_lambda", zeros)
             return zeros, None, None
 
         A, B = self.construct_ito_log_derivatives(walkers, trial)
         delta_lambda = self.split_gauge_scale * (B + self.split_gauge_q * A.conj())
         delta_lambda = self.apply_split_gauge_bound(delta_lambda)
         B_gauged = B - delta_lambda
+        self._diagnostic_record_array("A", A)
+        self._diagnostic_record_array("B", B)
+        self._diagnostic_record_array("delta_lambda", delta_lambda)
+        self._diagnostic_record_array("B_gauged", B_gauged)
+        if self.diagnostics_enabled:
+            self._diagnostic_last_arrays.update(
+                {
+                    "last_A": A.copy(),
+                    "last_B": B.copy(),
+                    "last_B_gauged": B_gauged.copy(),
+                    "last_delta_lambda": delta_lambda.copy(),
+                }
+            )
         return delta_lambda, A, B_gauged
 
     def construct_ito_log_derivatives(self, walkers, trial):
@@ -420,6 +829,12 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         ratio_abs = numpy.abs(ratio)
         nonzero = active & (ratio_abs > self.zero_overlap_threshold)
         log_abs[nonzero] = log_scalar[nonzero] + numpy.log(ratio_abs[nonzero])
+        overlap_ratio_log = numpy.full(walkers.nwalkers, numpy.nan, dtype=numpy.float64)
+        overlap_ratio_log[nonzero] = numpy.log(ratio_abs[nonzero])
+        self._diagnostic_record_real("log_likelihood", log_likelihood)
+        self._diagnostic_record_array("overlap_ratio", ratio)
+        self._diagnostic_record_real("overlap_ratio_log", overlap_ratio_log)
+        self._diagnostic_record_real("weight_increment_log", log_abs)
         self._apply_complex_factor(walkers, ratio, log_abs)
         walkers.ovlp = ovlp_new
         return None

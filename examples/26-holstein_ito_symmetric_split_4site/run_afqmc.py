@@ -16,6 +16,7 @@
 import argparse
 import os
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -144,6 +145,23 @@ def parse_args():
         action="store_true",
         help="Disable the scalar exp(dt * E_ref) reference-energy weight factor.",
     )
+    parser.add_argument(
+        "--diagnostics-file",
+        default=None,
+        help="Optional .npz path for per-step importance-propagator diagnostics.",
+    )
+    parser.add_argument(
+        "--diagnostics-stride",
+        type=int,
+        default=1,
+        help="Record every Nth propagation step when diagnostics are enabled.",
+    )
+    parser.add_argument(
+        "--diagnostics-max-records",
+        type=int,
+        default=None,
+        help="Optional cap on the number of diagnostic step summaries per rank.",
+    )
 
     parser.add_argument("--nsites", type=int, default=4)
     parser.add_argument("--t", type=float, default=1.0)
@@ -233,6 +251,15 @@ def main():
                 else float(np.real(trial_total_energy))
             )
             propagator.set_reference_energy(reference_energy)
+        diagnostics_path = None
+        if args.diagnostics_file is not None:
+            diagnostics_path = propagator.configure_diagnostics(
+                args.diagnostics_file,
+                mpi_handler=mpi_handler,
+                stride=args.diagnostics_stride,
+                max_records=args.diagnostics_max_records,
+                steps_per_block=args.steps_per_block,
+            )
 
         if comm.rank == 0:
             print("# Four-site Holstein free projection with symmetric-split Ito coherent-state walkers.")
@@ -271,6 +298,12 @@ def main():
                 print("# reference energy shift = disabled")
             else:
                 print(f"# reference energy shift = {reference_energy}")
+            if diagnostics_path is None:
+                print("# diagnostics file = disabled")
+            else:
+                print(f"# diagnostics file = {diagnostics_path}")
+                print(f"# diagnostics stride = {args.diagnostics_stride}")
+                print(f"# diagnostics max records = {args.diagnostics_max_records}")
 
         params = QMCParamsFP(
             num_walkers=nwalkers_local,
@@ -292,32 +325,36 @@ def main():
             params,
             verbose=(comm.rank == 0),
         )
-        qmc.run(
-            estimator_filename=args.estimator_file,
-            importance_sampling=args.importance_sampling,
-            verbose=(comm.rank == 0),
-        )
-        qmc.finalise(verbose=(comm.rank == 0))
-    
-        # analysis
-        if comm.rank == 0:
-            from ipie.addons.free_projection.analysis.extraction import extract_observable
-            from ipie.addons.free_projection.analysis.jackknife import jackknife_ratios
-        
-            data = np.zeros((qmc.params.num_blocks, 3), dtype=np.complex128)
-            for i in range(qmc.params.num_blocks):
-                data[i, 0] = (i+1) * qmc.params.num_steps_per_block * qmc.params.timestep
-                print(
-                    f"\nEnergy statistics at time {(i+1) * qmc.params.num_steps_per_block * qmc.params.timestep}:"
-                )   
-                qmc_data = extract_observable(qmc.estimators[i].filename, "energy")
-                energy_mean, energy_err = energy_statistics(
-                    qmc_data["ENumer"], qmc_data["EDenom"], jackknife_ratios
-                )
-                data[i, 1], data[i, 2] = energy_mean, energy_err
-                print(f"Energy: {energy_mean:.8e} +/- {energy_err:.8e}")
-            np.save('fp_data.npy', data)  
-        
+        try:
+            qmc.run(
+                estimator_filename=args.estimator_file,
+                importance_sampling=args.importance_sampling,
+                verbose=(comm.rank == 0),
+            )
+            qmc.finalise(verbose=(comm.rank == 0))
+
+            # analysis
+            if comm.rank == 0:
+                from ipie.addons.free_projection.analysis.extraction import extract_observable
+                from ipie.addons.free_projection.analysis.jackknife import jackknife_ratios
+
+                data = np.zeros((qmc.params.num_blocks, 3), dtype=np.complex128)
+                for i in range(qmc.params.num_blocks):
+                    data[i, 0] = (i+1) * qmc.params.num_steps_per_block * qmc.params.timestep
+                    print(
+                        f"\nEnergy statistics at time {(i+1) * qmc.params.num_steps_per_block * qmc.params.timestep}:"
+                    )
+                    qmc_data = extract_observable(qmc.estimators[i].filename, "energy")
+                    energy_mean, energy_err = energy_statistics(
+                        qmc_data["ENumer"], qmc_data["EDenom"], jackknife_ratios
+                    )
+                    data[i, 1], data[i, 2] = energy_mean, energy_err
+                    print(f"Energy: {energy_mean:.8e} +/- {energy_err:.8e}")
+                np.save('fp_data.npy', data)
+        finally:
+            if diagnostics_path is not None:
+                propagator.save_diagnostics(reason="driver_finally")
+
 
     finally:
         if output_tee is not None:
@@ -325,5 +362,24 @@ def main():
             output_tee.close()
 
 
+def abort_mpi_on_exception():
+    """Tear down all MPI ranks after an uncaught driver exception."""
+    traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        from mpi4py import MPI
+
+        comm = MPI.COMM_WORLD
+        if comm.Get_size() > 1:
+            comm.Abort(1)
+    except Exception:
+        pass
+    raise SystemExit(1)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        abort_mpi_on_exception()
