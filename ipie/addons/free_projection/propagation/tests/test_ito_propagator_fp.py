@@ -448,6 +448,9 @@ class _GaugeDerivativeTrial(_UnnormalizedTrial):
     ):
         return self.A.copy(), self.B.copy()
 
+    def calc_overlap(self, walkers):
+        return np.ones(walkers.nwalkers, dtype=np.complex128)
+
 
 @pytest.mark.unit
 def test_construct_trial_eph_mean_field_localized_holstein_density():
@@ -659,3 +662,143 @@ def test_ito_symm_phase_cancel_scalar_q_uses_base_noise_for_creation(monkeypatch
     np.testing.assert_allclose(walkers.coherent_state_shift, expected_alpha)
     np.testing.assert_allclose(walkers.phia, expected_phia)
     np.testing.assert_allclose(log_likelihood, expected_log_likelihood)
+
+
+@pytest.mark.unit
+def test_ito_symm_importance_diagnostics_record_q_quantities(tmp_path, monkeypatch):
+    nsites = 3
+    nwalkers = 2
+    dt = 0.04
+    q = 0.25
+    ham = HolsteinModel(g=0.7, t=0.2, w0=1.3, nsites=nsites, pbc=False)
+    ham.build()
+
+    alpha = np.array([0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j])
+    phia = np.array([1.0, -0.5j, 0.25], dtype=np.complex128)[:, None]
+    walkers = EPhCSWalkers(
+        np.column_stack([alpha, phia]), nup=1, ndown=0, nbasis=nsites, nwalkers=nwalkers
+    )
+    walkers.weight_log = np.zeros(nwalkers, dtype=np.complex128)
+
+    A = np.array(
+        [[0.2 + 0.1j, -0.3 + 0.4j, 0.5 - 0.2j],
+         [0.1 - 0.2j, 0.4 + 0.3j, -0.2 + 0.6j]],
+        dtype=np.complex128,
+    )
+    B = np.array(
+        [[-0.1 + 0.3j, 0.2 - 0.5j, 0.7 + 0.1j],
+         [0.3 + 0.2j, -0.6 + 0.1j, 0.2 - 0.4j]],
+        dtype=np.complex128,
+    )
+    trial = _GaugeDerivativeTrial(A, B)
+    prop = ItoSymmSplitImportancePropagatorFP(
+        dt,
+        mean_field_shift=np.zeros(nsites),
+        split_gauge="phase_cancel",
+        split_gauge_q=q,
+    )
+    prop.build(ham, trial=trial, walkers=walkers)
+    diagnostics_path = prop.configure_diagnostics(
+        tmp_path / "diag.npz", stride=1, steps_per_block=1
+    )
+
+    dW = np.array(
+        [[0.01 - 0.02j, -0.03 + 0.04j, 0.02 + 0.01j],
+         [0.05 + 0.02j, -0.01 - 0.03j, 0.04 - 0.02j]],
+        dtype=np.complex128,
+    )
+
+    def fake_noise(walkers_arg, hamiltonian_arg, step_size):
+        assert walkers_arg is walkers
+        assert hamiltonian_arg is ham
+        assert step_size == dt
+        return dW.copy()
+
+    monkeypatch.setattr(prop, "sample_complex_noise_with_step", fake_noise)
+
+    prop.propagate_walkers(walkers, ham, trial, eshift=0.0)
+    prop.save_diagnostics(reason="test")
+
+    data = np.load(diagnostics_path)
+    fields = list(data["fields"])
+    records = data["records"]
+    assert records.shape[0] == 1
+    for field in [
+        "A_max_norm",
+        "B_max_norm",
+        "delta_lambda_max_norm",
+        "B_gauged_max_norm",
+        "drift_max_norm",
+        "dW_max_norm",
+        "dZ_max_norm",
+        "dZ_creation_max_norm",
+        "creation_generator_max_norm",
+        "log_likelihood_max",
+        "weight_increment_log_max",
+        "final_weight_log_spread",
+        "final_phase_resultant",
+    ]:
+        assert field in fields
+        assert np.isfinite(records[0, fields.index(field)])
+    assert "last_A" in data.files
+    assert "last_B_gauged" in data.files
+    assert "last_creation_generator" in data.files
+
+
+@pytest.mark.unit
+def test_ito_symm_importance_scalar_q_likelihood_normalizes_base_noise():
+    rng = np.random.default_rng(1234)
+    nsample = 50000
+    nmodes = 3
+    dt = 0.02
+    A = np.array([0.15 - 0.05j, -0.08 + 0.12j, 0.04 + 0.09j])
+
+    for q in (0.25, 1.0, 4.0):
+        sqrt_q = np.sqrt(q)
+        drift = np.broadcast_to(sqrt_q * A.conj(), (nsample, nmodes))
+        dW = np.sqrt(0.5 * dt) * (
+            rng.normal(size=(nsample, nmodes))
+            + 1j * rng.normal(size=(nsample, nmodes))
+        )
+        dZ_base = drift * dt + dW
+        log_likelihood = ItoSymmSplitImportancePropagatorFP.gaussian_log_likelihood_ratio(
+            drift, dW, dt
+        )
+        likelihood = np.exp(log_likelihood)
+
+        np.testing.assert_allclose(np.mean(likelihood), 1.0, atol=8.0e-3)
+        np.testing.assert_allclose(
+            np.mean(likelihood[:, None] * dZ_base, axis=0),
+            np.zeros(nmodes),
+            atol=1.5e-3,
+        )
+        np.testing.assert_allclose(
+            np.mean(likelihood[:, None] * np.abs(dZ_base) ** 2, axis=0),
+            np.full(nmodes, dt),
+            rtol=0.04,
+            atol=8.0e-4,
+        )
+        np.testing.assert_allclose(
+            np.mean(likelihood[:, None] * np.abs(sqrt_q * dZ_base) ** 2, axis=0),
+            np.full(nmodes, q * dt),
+            rtol=0.04,
+            atol=8.0e-4,
+        )
+        np.testing.assert_allclose(
+            np.mean(likelihood[:, None] * np.abs(dZ_base / sqrt_q) ** 2, axis=0),
+            np.full(nmodes, dt / q),
+            rtol=0.04,
+            atol=8.0e-4,
+        )
+        cross_covariance = np.mean(
+            likelihood[:, None, None]
+            * (sqrt_q * dZ_base)[:, :, None]
+            * (dZ_base / sqrt_q).conj()[:, None, :],
+            axis=0,
+        )
+        np.testing.assert_allclose(
+            cross_covariance,
+            dt * np.eye(nmodes),
+            rtol=0.04,
+            atol=8.0e-4,
+        )
