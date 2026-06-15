@@ -18,7 +18,10 @@ from ipie.config import config
 from ipie.utils.backend import arraylib as xp
 from ipie.utils.backend import cast_to_device, qr, qr_mode, synchronize
 from ipie.walkers.base_walkers import BaseWalkers
-from ipie.addons.eph.trial_wavefunction.dd1 import dD1Trial
+try:  # dD1 trial module is absent in some forks; only needed for an isinstance check.
+    from ipie.addons.eph.trial_wavefunction.dd1 import dD1Trial
+except ModuleNotFoundError:
+    dD1Trial = None
 from ipie.addons.eph.trial_wavefunction.toyozawa import ToyozawaTrial
 
 class EPhWalkers(BaseWalkers):
@@ -97,7 +100,7 @@ class EPhWalkers(BaseWalkers):
         self.phonon_disp *= numpy.sqrt(2 / (trial.m * trial.w0)) # Makes this expected position instead of beta
 
 #        if hasattr(trial, "nperms"):
-        if isinstance(trial, dD1Trial):
+        if dD1Trial is not None and isinstance(trial, dD1Trial):
             shape = (self.nwalkers, self.nbasis, trial.nperms)
             shape_G = (self.nwalkers, self.nbasis, self.nbasis, trial.nperms)
         elif isinstance(trial, ToyozawaTrial):

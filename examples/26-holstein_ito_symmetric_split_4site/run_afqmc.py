@@ -76,11 +76,11 @@ class LiveTee:
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--nwalkers", type=int, default=2000)
-    parser.add_argument("--blocks", type=int, default=1000)
+    parser.add_argument("--nwalkers", type=int, default=1000)
+    parser.add_argument("--blocks", type=int, default=500)
     parser.add_argument("--steps-per-block", type=int, default=200)
     parser.add_argument("--iterations", type=int, default=20)
-    parser.add_argument("--timestep", type=float, default=1.0e-5)
+    parser.add_argument("--timestep", type=float, default=1.0e-4)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--stabilize-freq", type=int, default=20)
     parser.add_argument("--pop-control-freq", type=int, default=-1)

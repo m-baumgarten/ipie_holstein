@@ -330,19 +330,22 @@ def print_env_info(sha1, branch, local_mods, uuid, nranks):
             info[f"{lib:s}"] = {"version": vers, "path": path}
             if lib == "numpy":
                 try:
-                    np_lib = l.__config__.blas_opt_info["libraries"]
+                    try:
+                        np_lib = l.__config__.blas_opt_info["libraries"]
+                        lib_dir = l.__config__.blas_opt_info["library_dirs"]
+                    except AttributeError:
+                        np_lib = l.__config__.blas_ilp64_opt_info["libraries"]
+                        lib_dir = l.__config__.blas_ilp64_opt_info["library_dirs"]
+                    print(f"# - BLAS lib: {' '.join(np_lib):s}")
+                    print(f"# - BLAS dir: {' '.join(lib_dir):s}")
+                    info[f"{lib:s}"]["BLAS"] = {
+                        "lib": " ".join(np_lib),
+                        "path": " ".join(lib_dir),
+                    }
                 except AttributeError:
-                    np_lib = l.__config__.blas_ilp64_opt_info["libraries"]
-                print(f"# - BLAS lib: {' '.join(np_lib):s}")
-                try:
-                    lib_dir = l.__config__.blas_opt_info["library_dirs"]
-                except AttributeError:
-                    lib_dir = l.__config__.blas_ilp64_opt_info["library_dirs"]
-                print(f"# - BLAS dir: {' '.join(lib_dir):s}")
-                info[f"{lib:s}"]["BLAS"] = {
-                    "lib": " ".join(np_lib),
-                    "path": " ".join(lib_dir),
-                }
+                    # numpy >= 1.26 removed the *_opt_info introspection dicts;
+                    # environment logging must never kill a run.
+                    pass
             elif lib == "mpi4py":
                 mpicc = l.get_config().get("mpicc", "none")
                 print(f"# - mpicc: {mpicc:s}")
