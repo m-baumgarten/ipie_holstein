@@ -554,6 +554,13 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         split_gauge_scale=1.0,
         split_gauge_max_norm=None,
         split_gauge_q=1.0,
+        split_gauge_q_optimize=False,
+        split_gauge_q_per_walker=False,
+        split_gauge_q_stride=None,
+        split_gauge_q_bounds=None,
+        split_gauge_q_smoothing=1.0,
+        split_gauge_electron_cost="auto",
+        gap_floor=1.0e-6,
         exponential_action="expm",
         exponential_taylor_order=6,
     ):
@@ -568,6 +575,33 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             raise ValueError("split_gauge_q must be finite and positive.")
         if split_gauge != "phase_cancel" and split_gauge_q != 1.0:
             raise ValueError("split_gauge_q != 1 requires split_gauge='phase_cancel'.")
+        if split_gauge_q_optimize and split_gauge != "phase_cancel":
+            raise ValueError(
+                "split_gauge_q_optimize=True requires split_gauge='phase_cancel'."
+            )
+        if split_gauge_q_per_walker and split_gauge != "phase_cancel":
+            raise ValueError(
+                "split_gauge_q_per_walker=True requires split_gauge='phase_cancel'."
+            )
+        if split_gauge_electron_cost not in ("auto", "sensitivity", "kick"):
+            raise ValueError(
+                "split_gauge_electron_cost must be 'auto', 'sensitivity', or 'kick'."
+            )
+        if split_gauge_q_stride is not None:
+            split_gauge_q_stride = int(split_gauge_q_stride)
+            if split_gauge_q_stride < 1:
+                raise ValueError("split_gauge_q_stride must be a positive integer.")
+        smoothing = float(split_gauge_q_smoothing)
+        if not 0.0 < smoothing <= 1.0:
+            raise ValueError("split_gauge_q_smoothing must be in (0, 1].")
+        if split_gauge_q_bounds is not None:
+            q_min, q_max = (float(split_gauge_q_bounds[0]), float(split_gauge_q_bounds[1]))
+            if not (0.0 < q_min <= q_max):
+                raise ValueError("split_gauge_q_bounds must satisfy 0 < q_min <= q_max.")
+            split_gauge_q_bounds = (q_min, q_max)
+        gap_floor = float(gap_floor)
+        if not numpy.isfinite(gap_floor) or gap_floor <= 0.0:
+            raise ValueError("gap_floor must be finite and positive.")
         super().__init__(
             time_step,
             verbose=verbose,
@@ -590,6 +624,38 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
         if self.split_gauge_max_norm is not None and self.split_gauge_max_norm < 0.0:
             raise ValueError("split_gauge_max_norm must be non-negative.")
 
+        # Periodic scalar-q optimization (Green--Kubo objective, noise_gauges
+        # Sec. 11.5).  See q_gauge_optimization_notes.md for the derivation.
+        self.split_gauge_q_optimize = bool(split_gauge_q_optimize)
+        self.split_gauge_q_per_walker = bool(split_gauge_q_per_walker)
+        self.split_gauge_q_stride = split_gauge_q_stride
+        self.split_gauge_q_bounds = split_gauge_q_bounds
+        self.split_gauge_q_smoothing = smoothing
+        self.split_gauge_electron_cost = split_gauge_electron_cost
+        self.gap_floor = gap_floor
+        self._q_step_counter = 0
+        self._mpi_handler = None
+        self._omega = None
+        self._coupling_hermitian = False
+        self._g_tensor_full_dagger = None
+        self._g_tensor_full = None
+        self.last_q_diagnostics = None
+
+    def build(self, hamiltonian, trial=None, walkers=None, mpi_handler=None) -> None:
+        super().build(hamiltonian, trial=trial, walkers=walkers, mpi_handler=mpi_handler)
+        self._mpi_handler = mpi_handler
+        w0 = numpy.asarray(hamiltonian.w0, dtype=numpy.float64)
+        self._omega = numpy.broadcast_to(w0, (hamiltonian.N,)).astype(numpy.float64).copy()
+        # Full (non mean-field-subtracted) coupling tensors, for the local-energy
+        # operator and the *full* <G_mu> entering the phonon sensitivity.
+        g_full = numpy.asarray(hamiltonian.g_tensor, dtype=numpy.complex128)
+        self._g_tensor_full = g_full
+        self._g_tensor_full_dagger = numpy.swapaxes(g_full.conj(), 0, 1)
+        # Hermitian coupling (Holstein g n_i): <G_mu> == <G_mu^dagger> == B_mu.
+        self._coupling_hermitian = numpy.allclose(
+            g_full, numpy.swapaxes(g_full.conj(), 0, 1)
+        )
+
     def propagate_walkers(self, walkers, hamiltonian, trial, eshift=None) -> None:
         self._diagnostic_begin_step(walkers)
         try:
@@ -600,6 +666,8 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             self._diagnostic_check_finite("old_overlap", walkers)
             synchronize()
             self.timer.tovlp += time.time() - start_time
+
+            self.maybe_optimize_split_gauge_q(walkers, hamiltonian, trial)
 
             log_likelihood = self.propagate(walkers, hamiltonian, trial)
 
@@ -669,17 +737,18 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             return dZ, dZ, log_likelihood, delta_lambda
 
         dW = self.sample_complex_noise_with_step(walkers, hamiltonian, step_size)
+        sqrt_q = self._sqrt_q_bcast()
         drift = self.construct_force_bias(
             walkers,
             hamiltonian,
             trial,
             A=A,
             B=B,
-            noise_scale=self.split_gauge_sqrt_q,
+            noise_scale=sqrt_q,
         )
         dZ_base = drift * step_size + dW
-        dZ = self.split_gauge_sqrt_q * dZ_base
-        dZ_creation = dZ_base / self.split_gauge_sqrt_q
+        dZ = sqrt_q * dZ_base
+        dZ_creation = dZ_base / sqrt_q
         log_likelihood = self.gaussian_log_likelihood_ratio(drift, dW, step_size)
         self._diagnostic_record_array("drift", drift)
         self._diagnostic_record_array("dW", dW)
@@ -705,7 +774,7 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             return zeros, None, None
 
         A, B = self.construct_ito_log_derivatives(walkers, trial)
-        delta_lambda = self.split_gauge_scale * (B + self.split_gauge_q * A.conj())
+        delta_lambda = self.split_gauge_scale * (B + self._q_bcast() * A.conj())
         delta_lambda = self.apply_split_gauge_bound(delta_lambda)
         B_gauged = B - delta_lambda
         self._diagnostic_record_array("A", A)
@@ -737,6 +806,251 @@ class ItoSymmSplitImportancePropagatorFP(ItoSymmSplitPropagatorFP):
             numpy.asarray(A, dtype=numpy.complex128),
             numpy.asarray(B, dtype=numpy.complex128),
         )
+
+    # ------------------------------------------------------------------
+    # Periodic scalar-q optimization (Green--Kubo, noise_gauges Sec. 11.5).
+    # See examples/.../q_gauge_optimization_notes.md for the full derivation.
+    # ------------------------------------------------------------------
+    def _q_bcast(self):
+        q = self.split_gauge_q
+        return q[:, None] if numpy.ndim(q) > 0 else q
+
+    def _sqrt_q_bcast(self):
+        s = self.split_gauge_sqrt_q
+        return s[:, None] if numpy.ndim(s) > 0 else s
+
+    def maybe_optimize_split_gauge_q(self, walkers, hamiltonian, trial):
+        r"""Refresh the diffusion gauge ``q`` if a refresh is due.
+
+        The gauge is computed from the *pre-noise* population, hence adapted, so
+        the estimator stays unbiased (noise_gauges Thm. 4.6 / Rmk. 11.10). In
+        per-walker mode a separate ``q_w`` is recomputed for every walker every
+        step; otherwise a single population-averaged scalar is refreshed on the
+        configured stride.
+        """
+        if getattr(self, "split_gauge_q_per_walker", False):
+            # Optional refresh stride: recompute per-walker q every `stride` steps
+            # and hold it fixed in between (piecewise-constant, still adapted ->
+            # unbiased by Thm. 4.6).  stride=None/1 recomputes every step.
+            stride = self.split_gauge_q_stride or 1
+            due = (self._q_step_counter % stride == 0)
+            self._q_step_counter += 1
+            if due:
+                return self.optimize_split_gauge_q_per_walker(walkers, hamiltonian, trial)
+            return None
+        if not self.split_gauge_q_optimize:
+            return None
+        stride = self.split_gauge_q_stride
+        due = (self._q_step_counter == 0) or (
+            stride is not None and self._q_step_counter % stride == 0
+        )
+        self._q_step_counter += 1
+        if not due:
+            return None
+        return self.optimize_split_gauge_q(walkers, hamiltonian, trial)
+
+    def optimize_split_gauge_q_per_walker(self, walkers, hamiltonian, trial):
+        r"""Set a per-walker ``q_w = sqrt(trV_w / trW_ph_w)`` from each walker.
+
+        No population sum and no MPI reduction: every walker carries its own
+        instantaneous diffusion gauge, recomputed every step. The estimator is
+        still unbiased because ``q_w`` is an adapted (pre-noise) function of that
+        walker's coordinates (Thm. 4.6).
+        """
+        a_w, b_w = self._accumulate_gauge_costs(
+            walkers, hamiltonian, trial, per_walker=True
+        )
+        prev = self.split_gauge_q
+        prev = prev if numpy.ndim(prev) > 0 else numpy.full(walkers.nwalkers, float(prev))
+        good = numpy.isfinite(a_w) & numpy.isfinite(b_w) & (a_w > 0.0) & (b_w >= 0.0)
+        q_star = numpy.where(good, numpy.sqrt(numpy.divide(b_w, a_w, where=good,
+                                                           out=numpy.ones_like(a_w))), prev)
+        alpha = self.split_gauge_q_smoothing
+        q_new = prev ** (1.0 - alpha) * q_star ** alpha
+        if self.split_gauge_q_bounds is not None:
+            q_min, q_max = self.split_gauge_q_bounds
+            q_new = numpy.clip(q_new, q_min, q_max)
+        q_new = numpy.where(numpy.isfinite(q_new) & (q_new > 0.0), q_new, prev)
+        self._set_split_gauge_q(q_new)
+        self.last_q_diagnostics = {
+            "step": int(self._q_step_counter - 1),
+            "q_mean": float(numpy.mean(q_new)),
+            "q_median": float(numpy.median(q_new)),
+            "q_min": float(numpy.min(q_new)),
+            "q_max": float(numpy.max(q_new)),
+        }
+        return q_new
+
+    def optimize_split_gauge_q(self, walkers, hamiltonian, trial):
+        r"""Set ``q* = sqrt(sum_w trV_w / sum_w trW_ph_w)`` from the population."""
+        a_local, b_local = self._accumulate_gauge_costs(walkers, hamiltonian, trial)
+        a_tot, b_tot = self._reduce_gauge_costs(a_local, b_local)
+        diagnostics = {
+            "step": int(self._q_step_counter - 1),
+            "q_old": float(self.split_gauge_q),
+            "trW_ph": a_tot,
+            "trV": b_tot,
+        }
+        if (
+            not numpy.isfinite(a_tot)
+            or not numpy.isfinite(b_tot)
+            or a_tot <= 0.0
+            or b_tot < 0.0
+        ):
+            diagnostics["q_star"] = float("nan")
+            diagnostics["q_new"] = float(self.split_gauge_q)
+            self.last_q_diagnostics = diagnostics
+            return self.split_gauge_q
+        q_star = float(numpy.sqrt(b_tot / a_tot))
+        q_new = self._blend_and_clamp_q(q_star)
+        diagnostics["q_star"] = q_star
+        diagnostics["q_new"] = q_new
+        self._set_split_gauge_q(q_new)
+        self.last_q_diagnostics = diagnostics
+        if self.diagnostics_enabled:
+            self._diagnostic_record_real("q_star", numpy.array([q_star]))
+            self._diagnostic_record_real("q_new", numpy.array([q_new]))
+        return q_new
+
+    def _set_split_gauge_q(self, q):
+        if numpy.ndim(q) > 0:
+            self.split_gauge_q = numpy.asarray(q, dtype=numpy.float64)
+        else:
+            self.split_gauge_q = float(q)
+        self.split_gauge_sqrt_q = numpy.sqrt(self.split_gauge_q)
+
+    def _blend_and_clamp_q(self, q_star):
+        # Geometric blend == trust region on |log q| (bias-free; variance only).
+        alpha = self.split_gauge_q_smoothing
+        q_new = self.split_gauge_q ** (1.0 - alpha) * q_star ** alpha
+        if self.split_gauge_q_bounds is not None:
+            q_min, q_max = self.split_gauge_q_bounds
+            q_new = min(max(q_new, q_min), q_max)
+        return float(q_new)
+
+    def _reduce_gauge_costs(self, a_local, b_local):
+        handler = self._mpi_handler
+        comm = getattr(handler, "comm", None) if handler is not None else None
+        if comm is not None:
+            size = getattr(comm, "size", None)
+            if size is None:
+                size = comm.Get_size()
+            if size > 1:
+                a_local = comm.allreduce(a_local)
+                b_local = comm.allreduce(b_local)
+        return float(a_local), float(b_local)
+
+    def _accumulate_gauge_costs(self, walkers, hamiltonian, trial, per_walker=False):
+        r"""Return ``(trW_ph, trV)``.
+
+        If ``per_walker`` is False, return per-rank population sums (scalars). If
+        True, return the per-walker arrays ``(trW_ph_w, trV_w)`` without summing.
+        """
+        A, G_dagger = trial.calc_ito_log_derivatives(
+            walkers,
+            self._g_tensor_full_dagger,
+            zero_overlap_threshold=self.zero_overlap_threshold,
+        )
+        A = numpy.asarray(A, dtype=numpy.complex128)
+        G_dagger = numpy.asarray(G_dagger, dtype=numpy.complex128)
+
+        # Phonon cost: s_mu = omega_mu A_mu + <G_mu>;  trW_ph = sum_mu |s_mu|^2/omega_mu^2.
+        if self._coupling_hermitian:
+            G_exp = G_dagger
+        else:
+            _, G_exp = trial.calc_ito_log_derivatives(
+                walkers,
+                self._g_tensor_full,
+                zero_overlap_threshold=self.zero_overlap_threshold,
+            )
+            G_exp = numpy.asarray(G_exp, dtype=numpy.complex128)
+        omega = self._omega[None, :]
+        s = omega * A + G_exp
+        trW_ph = numpy.sum((numpy.abs(s) ** 2) / (omega ** 2), axis=1)
+
+        # Electron cost: trV = ||u||^2 / Delta^2.
+        u2 = self._electron_channel_norm_sq(walkers, hamiltonian, trial, A)
+        gap2 = self._effective_gap_sq(walkers, hamiltonian)
+        trV = u2 / gap2
+
+        if per_walker:
+            return trW_ph, trV
+        finite = numpy.isfinite(trW_ph) & numpy.isfinite(trV)
+        return float(numpy.sum(trW_ph[finite])), float(numpy.sum(trV[finite]))
+
+    def _electron_channel_norm_sq(self, walkers, hamiltonian, trial, A):
+        r"""Return ``sum_rho |u_rho|^2`` per walker (sensitivity, or kick proxy)."""
+        mode = self.split_gauge_electron_cost
+        if mode in ("auto", "sensitivity"):
+            try:
+                return self._channel_sensitivity_sq(walkers, hamiltonian, trial, A)
+            except Exception:
+                if mode == "sensitivity":
+                    raise
+        return self._channel_kick_sq(walkers)
+
+    def _channel_sensitivity_sq(self, walkers, hamiltonian, trial, A):
+        r"""Exact connected-correlator channel sensitivity ``u_rho = Cov(Ohat, G_rho^dagger)``.
+
+        ``u_rho = sum_il G_il [Ohat (I - G^T) G_rho^dagger]_il`` per spin sector,
+        with ``Ohat = h_eff(f) + sum_mu A_mu G_mu^dagger`` and ``G`` the mixed
+        one-body density matrix (``<X> = einsum('ij,nij', X, G)``).
+        """
+        G_list = trial.calc_greens_function(walkers)
+        h_eff = self.construct_annihilation_matrix(
+            walkers.coherent_state_shift, hamiltonian
+        )
+        gdag = self._g_tensor_full_dagger
+        nb = gdag.shape[0]
+        eye = numpy.eye(nb, dtype=numpy.complex128)
+        ohat_creation = numpy.einsum("ijm,nm->nij", gdag, A)
+
+        nspin = 2 if getattr(walkers, "ndown", 0) > 0 else 1
+        u2 = numpy.zeros(walkers.nwalkers, dtype=numpy.float64)
+        for spin in range(nspin):
+            G = numpy.asarray(G_list[spin], dtype=numpy.complex128)
+            ohat = h_eff[spin] + ohat_creation
+            gT = numpy.swapaxes(G, 1, 2)
+            M = numpy.einsum("nik,nkl->nil", ohat, eye[None, :, :] - gT)
+            P = numpy.einsum("nik,klm->nilm", M, gdag)
+            u = numpy.einsum("nil,nilm->nm", G, P)
+            u2 += numpy.sum(numpy.abs(u) ** 2, axis=1)
+        return u2
+
+    def _channel_kick_sq(self, walkers):
+        r"""Kick-norm proxy ``sum_rho ||G_rho^dagger psi||^2`` (diagonal recipe)."""
+        gdag = self.g_tensor_residual_dagger
+        total = numpy.zeros(walkers.nwalkers, dtype=numpy.float64)
+        for phi in (walkers.phia,) + (
+            (walkers.phib,) if getattr(walkers, "ndown", 0) > 0 else ()
+        ):
+            generated = numpy.einsum("ijm,nje->niem", gdag, phi)
+            total += numpy.sum(numpy.abs(generated) ** 2, axis=(1, 2, 3))
+        return total
+
+    def _effective_gap_sq(self, walkers, hamiltonian):
+        r"""Squared real-part spectral gap of ``h_eff(f)`` per walker, floored.
+
+        Vectorized over walkers (batched ``eigvals``) so it is cheap enough to
+        call every step in per-walker mode.
+        """
+        h_eff = self.construct_annihilation_matrix(
+            walkers.coherent_state_shift, hamiltonian
+        )[0]
+        gaps = numpy.full(walkers.nwalkers, self.gap_floor, dtype=numpy.float64)
+        finite_mat = numpy.all(numpy.isfinite(h_eff), axis=(1, 2))
+        if numpy.any(finite_mat):
+            try:
+                eigs = numpy.linalg.eigvals(h_eff[finite_mat])  # (m, nbasis)
+                re = numpy.sort(eigs.real, axis=1)
+                if re.shape[1] > 1:
+                    gaps[finite_mat] = re[:, 1] - re[:, 0]
+            except numpy.linalg.LinAlgError:
+                pass
+        gaps = numpy.where(
+            numpy.isfinite(gaps) & (gaps > self.gap_floor), gaps, self.gap_floor
+        )
+        return gaps ** 2
 
     def apply_split_gauge_bound(self, delta_lambda):
         if self.split_gauge_max_norm is None:

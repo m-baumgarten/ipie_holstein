@@ -123,6 +123,41 @@ def parse_args():
         help="Global scalar Q gauge for phase-cancel importance sampling.",
     )
     parser.add_argument(
+        "--split-gauge-q-optimize",
+        action="store_true",
+        help="Periodically re-optimize the scalar q gauge (Green-Kubo, Sec. 11.5).",
+    )
+    parser.add_argument(
+        "--split-gauge-q-stride",
+        type=int,
+        default=None,
+        help="Refresh q every N steps (default: once at the first step).",
+    )
+    parser.add_argument(
+        "--split-gauge-q-min",
+        type=float,
+        default=None,
+        help="Lower clamp for the optimized q (trust region).",
+    )
+    parser.add_argument(
+        "--split-gauge-q-max",
+        type=float,
+        default=None,
+        help="Upper clamp for the optimized q (trust region).",
+    )
+    parser.add_argument(
+        "--split-gauge-q-smoothing",
+        type=float,
+        default=1.0,
+        help="Geometric blend alpha in (0,1] for q updates (1.0 = full update).",
+    )
+    parser.add_argument(
+        "--split-gauge-electron-cost",
+        choices=("auto", "sensitivity", "kick"),
+        default="auto",
+        help="Electron cost metric for q optimization.",
+    )
+    parser.add_argument(
         "--exponential-action",
         choices=("expm", "taylor"),
         default="expm",
@@ -238,6 +273,18 @@ def main():
             split_gauge_scale=args.split_gauge_scale,
             split_gauge_max_norm=args.split_gauge_max_norm,
             split_gauge_q=args.split_gauge_q,
+            split_gauge_q_optimize=args.split_gauge_q_optimize,
+            split_gauge_q_stride=args.split_gauge_q_stride,
+            split_gauge_q_bounds=(
+                None
+                if (args.split_gauge_q_min is None and args.split_gauge_q_max is None)
+                else (
+                    args.split_gauge_q_min if args.split_gauge_q_min is not None else 1e-8,
+                    args.split_gauge_q_max if args.split_gauge_q_max is not None else 1e8,
+                )
+            ),
+            split_gauge_q_smoothing=args.split_gauge_q_smoothing,
+            split_gauge_electron_cost=args.split_gauge_electron_cost,
             exponential_action=args.exponential_action,
             exponential_taylor_order=args.exponential_taylor_order,
             mpi_handler=mpi_handler,
@@ -274,6 +321,13 @@ def main():
                 print(f"# split gauge scale = {args.split_gauge_scale}")
                 print(f"# split gauge max norm = {args.split_gauge_max_norm}")
                 print(f"# split gauge q = {args.split_gauge_q}")
+                print(f"# split gauge q optimize = {args.split_gauge_q_optimize}")
+                if args.split_gauge_q_optimize:
+                    print(f"# split gauge q stride = {args.split_gauge_q_stride}")
+                    print(f"# split gauge q min = {args.split_gauge_q_min}")
+                    print(f"# split gauge q max = {args.split_gauge_q_max}")
+                    print(f"# split gauge q smoothing = {args.split_gauge_q_smoothing}")
+                    print(f"# split gauge electron cost = {args.split_gauge_electron_cost}")
             print(f"# exponential action = {args.exponential_action}")
             if args.exponential_action == "taylor":
                 print(f"# exponential Taylor order = {args.exponential_taylor_order}")
