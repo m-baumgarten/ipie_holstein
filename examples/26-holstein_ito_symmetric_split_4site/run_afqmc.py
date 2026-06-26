@@ -125,13 +125,20 @@ def parse_args():
     parser.add_argument(
         "--split-gauge-q-optimize",
         action="store_true",
-        help="Periodically re-optimize the scalar q gauge (Green-Kubo, Sec. 11.5).",
+        help="Periodically re-optimize a single population-scalar q (Green-Kubo, Sec. 11.5).",
+    )
+    parser.add_argument(
+        "--split-gauge-q-per-walker",
+        action="store_true",
+        help="Per-walker q: each walker carries its own q, recomputed from its own state "
+        "(every step, or every --split-gauge-q-stride steps). Overrides --split-gauge-q-optimize.",
     )
     parser.add_argument(
         "--split-gauge-q-stride",
         type=int,
         default=None,
-        help="Refresh q every N steps (default: once at the first step).",
+        help="Refresh q every N steps. Population-scalar mode: default once at the first step. "
+        "Per-walker mode: default every step.",
     )
     parser.add_argument(
         "--split-gauge-q-min",
@@ -274,6 +281,7 @@ def main():
             split_gauge_max_norm=args.split_gauge_max_norm,
             split_gauge_q=args.split_gauge_q,
             split_gauge_q_optimize=args.split_gauge_q_optimize,
+            split_gauge_q_per_walker=args.split_gauge_q_per_walker,
             split_gauge_q_stride=args.split_gauge_q_stride,
             split_gauge_q_bounds=(
                 None
@@ -322,11 +330,13 @@ def main():
                 print(f"# split gauge max norm = {args.split_gauge_max_norm}")
                 print(f"# split gauge q = {args.split_gauge_q}")
                 print(f"# split gauge q optimize = {args.split_gauge_q_optimize}")
-                if args.split_gauge_q_optimize:
+                print(f"# split gauge q per walker = {args.split_gauge_q_per_walker}")
+                if args.split_gauge_q_optimize or args.split_gauge_q_per_walker:
                     print(f"# split gauge q stride = {args.split_gauge_q_stride}")
                     print(f"# split gauge q min = {args.split_gauge_q_min}")
                     print(f"# split gauge q max = {args.split_gauge_q_max}")
                     print(f"# split gauge q smoothing = {args.split_gauge_q_smoothing}")
+                    print(f"# split gauge electron cost = {args.split_gauge_electron_cost}")
                     print(f"# split gauge electron cost = {args.split_gauge_electron_cost}")
             print(f"# exponential action = {args.exponential_action}")
             if args.exponential_action == "taylor":
